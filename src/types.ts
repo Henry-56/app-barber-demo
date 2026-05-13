@@ -17,7 +17,7 @@ export type Client = {
   notes?: string;
   visitHistory: string[];
   lastVisitNotified?: boolean;
-  avgFrequencyDays: number | null;
+  avgFrequencyDays?: number | null;
   pendingOutreach?: PendingOutreach | null;
 };
 
