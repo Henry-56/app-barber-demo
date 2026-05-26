@@ -2,8 +2,8 @@ import type { Metadata } from "next";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "BarberTracker Pro",
-  description: "Sistema de gestión y fidelización para barberías",
+  title: "BarberFlow Basic",
+  description: "Plataforma de gestión para barberías",
 };
 
 export default function RootLayout({
