@@ -40,8 +40,12 @@ Completaste 5 cortes en {{shopName}}.
 
 Agenda cuando quieras: {{bookingUrl}}`,
 
-  bienvenida: `👋 ¡Bienvenido a {{shopName}}!
+  bienvenida: `Hola {{clientName}} 👋 Bienvenido a {{shopName}}.
 
-Gracias por tu primera visita. Puedes ver tu historial y agendar tu próxima cita aquí:
-{{bookingUrl}}`,
+Tu tarjeta de fidelización ya está activa — cada 5 cortes el 6to es gratis ✂️
+
+Para tu próxima cita puedes agendarla directo aquí (sin llamar ni escribir):
+👉 {{bookingUrl}}
+
+¡Te esperamos!`,
 };

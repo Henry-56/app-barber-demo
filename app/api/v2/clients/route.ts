@@ -2,7 +2,9 @@ import { NextResponse } from 'next/server';
 import { auth } from '@/src/lib/auth';
 import { db } from '@/src/lib/drizzle';
 import { clients } from '@/src/lib/schema';
-import { eq, and, or, ilike, desc } from 'drizzle-orm';
+import { and, eq, desc } from 'drizzle-orm';
+import { findOrCreateClient } from '@/src/lib/clients';
+import { normalizePhone } from '@/src/lib/phone';
 
 export async function GET(req: Request) {
   const session = await auth();
@@ -11,15 +13,25 @@ export async function GET(req: Request) {
   const { searchParams } = new URL(req.url);
   const q = searchParams.get('q') ?? '';
   const filter = searchParams.get('filter') ?? 'all';
+  const phoneQuery = searchParams.get('phone');
 
   const barbershopId = session.user.barbershopId;
 
-  let whereClause = eq(clients.barbershopId, barbershopId);
+  // Lookup by phone (for modal search)
+  if (phoneQuery) {
+    const normalized = normalizePhone(phoneQuery);
+    const [client] = await db
+      .select()
+      .from(clients)
+      .where(and(eq(clients.barbershopId, barbershopId), eq(clients.phone, normalized)))
+      .limit(1);
+    return NextResponse.json(client ?? null);
+  }
 
   const rows = await db
     .select()
     .from(clients)
-    .where(whereClause)
+    .where(eq(clients.barbershopId, barbershopId))
     .orderBy(desc(clients.lastVisitAt));
 
   let result = rows;
@@ -41,25 +53,27 @@ export async function POST(req: Request) {
   const session = await auth();
   if (!session?.user?.barbershopId) return NextResponse.json({ error: 'No autorizado' }, { status: 401 });
 
-  const { name, phone, notes } = await req.json();
+  const { phone, name, notes } = await req.json();
 
-  if (!name || !phone) return NextResponse.json({ error: 'Nombre y teléfono requeridos' }, { status: 400 });
+  if (!phone) return NextResponse.json({ error: 'Teléfono requerido' }, { status: 400 });
 
-  let normalizedPhone = phone.replace(/\s/g, '');
-  if (/^9\d{8}$/.test(normalizedPhone)) normalizedPhone = `+51${normalizedPhone}`;
-
-  const [client] = await db
-    .insert(clients)
-    .values({
+  try {
+    const { client, isNew } = await findOrCreateClient({
       barbershopId: session.user.barbershopId,
+      phone,
       name,
-      phone: normalizedPhone,
-      notes: notes ?? null,
-      lastVisitAt: new Date(),
-      totalVisits: 0,
-      loyaltyPoints: 0,
-    })
-    .returning();
+      source: 'manual',
+    });
 
-  return NextResponse.json(client, { status: 201 });
+    if (notes && isNew) {
+      await db.update(clients).set({ notes }).where(eq(clients.id, client.id));
+    }
+
+    return NextResponse.json({ ...client, isNew }, { status: isNew ? 201 : 200 });
+  } catch (e) {
+    if (e instanceof Error && e.message === 'NAME_REQUIRED') {
+      return NextResponse.json({ needsName: true });
+    }
+    throw e;
+  }
 }

@@ -10,7 +10,9 @@ type Shop = {
   services: { id: string; name: string; price: string; durationMinutes: number }[];
 };
 
-type Step = 'service' | 'barber' | 'date' | 'time' | 'contact' | 'done';
+type Step = 'phone' | 'service' | 'barber' | 'date' | 'time' | 'done';
+
+type FoundClient = { clientId: string; name: string; loyaltyPoints: number };
 
 const DAY_NAMES: Record<number, string> = {
   0: 'domingo', 1: 'lunes', 2: 'martes', 3: 'miercoles',
@@ -25,26 +27,33 @@ const cardStyle = { background: '#161616', border: '1px solid #2a2a2a', borderRa
 export default function ReservarPage({ params }: { params: Promise<{ slug: string }> }) {
   const { slug } = use(params);
   const [shop, setShop] = useState<Shop | null>(null);
-  const [step, setStep] = useState<Step>('service');
+  const [step, setStep] = useState<Step>('phone');
+
+  // Phone step state
+  const [phoneInput, setPhoneInput] = useState('');
+  const [phoneLoading, setPhoneLoading] = useState(false);
+  const [foundClient, setFoundClient] = useState<FoundClient | null>(null);
+  const [isNewClient, setIsNewClient] = useState(false);
+  const [newName, setNewName] = useState('');
+  const [phoneChecked, setPhoneChecked] = useState(false);
+
+  // Booking state
   const [selectedService, setSelectedService] = useState<Shop['services'][0] | null>(null);
   const [selectedBarber, setSelectedBarber] = useState<Shop['barbers'][0] | null>(null);
-  const [selectedDate, setSelectedDate] = useState<string>(''); // YYYY-MM-DD
+  const [selectedDate, setSelectedDate] = useState<string>('');
   const [selectedTime, setSelectedTime] = useState<string>('');
+  const [notes, setNotes] = useState('');
   const [slots, setSlots] = useState<{ time: string; available: boolean }[]>([]);
   const [slotsLoading, setSlotsLoading] = useState(false);
   const [availableDates, setAvailableDates] = useState<string[]>([]);
-  const [clientName, setClientName] = useState('');
-  const [clientPhone, setClientPhone] = useState('');
-  const [notes, setNotes] = useState('');
   const [submitting, setSubmitting] = useState(false);
-  const [result, setResult] = useState<{ clientId: string } | null>(null);
+  const [resultClientId, setResultClientId] = useState<string>('');
 
   useEffect(() => {
     fetch(`/api/public/${slug}`)
       .then(r => r.json())
       .then(data => {
         setShop(data);
-        // Compute available dates
         const dates: string[] = [];
         const today = new Date();
         today.setHours(0, 0, 0, 0);
@@ -54,9 +63,7 @@ export default function ReservarPage({ params }: { params: Promise<{ slug: strin
           d.setDate(today.getDate() + i);
           const dayName = DAY_NAMES[d.getDay()];
           const cfg = data.openingHours?.[dayName];
-          if (cfg && !cfg.closed) {
-            dates.push(d.toISOString().split('T')[0]);
-          }
+          if (cfg && !cfg.closed) dates.push(d.toISOString().split('T')[0]);
         }
         setAvailableDates(dates);
       });
@@ -65,9 +72,9 @@ export default function ReservarPage({ params }: { params: Promise<{ slug: strin
   useEffect(() => {
     if (!selectedDate || !shop) return;
     setSlotsLoading(true);
-    const params = new URLSearchParams({ date: selectedDate });
-    if (selectedBarber) params.set('barberId', selectedBarber.id);
-    fetch(`/api/public/${slug}/availability?${params}`)
+    const p = new URLSearchParams({ date: selectedDate });
+    if (selectedBarber) p.set('barberId', selectedBarber.id);
+    fetch(`/api/public/${slug}/availability?${p}`)
       .then(r => r.json())
       .then(data => { setSlots(data.slots ?? []); setSlotsLoading(false); });
   }, [selectedDate, selectedBarber, slug, shop]);
@@ -77,15 +84,37 @@ export default function ReservarPage({ params }: { params: Promise<{ slug: strin
     return `${dt.getDate()} de ${MONTH_NAMES[dt.getMonth()]}`;
   };
 
+  const handlePhoneContinue = async () => {
+    if (!phoneInput.trim()) return;
+    setPhoneLoading(true);
+    const res = await fetch(`/api/public/${slug}/lookup?phone=${encodeURIComponent(phoneInput.trim())}`);
+    const data = await res.json();
+    setPhoneLoading(false);
+    setPhoneChecked(true);
+    if (data.found) {
+      setFoundClient({ clientId: data.clientId, name: data.name, loyaltyPoints: data.loyaltyPoints });
+      setIsNewClient(false);
+    } else {
+      setFoundClient(null);
+      setIsNewClient(true);
+    }
+  };
+
+  const handleProceedToBooking = () => {
+    if (foundClient || (isNewClient && newName.trim())) {
+      setStep('service');
+    }
+  };
+
   const handleSubmit = async () => {
-    if (!clientName.trim() || !clientPhone.trim()) return;
     setSubmitting(true);
+    const clientName = foundClient ? foundClient.name : newName.trim();
     const res = await fetch(`/api/public/${slug}/book`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        clientName: clientName.trim(),
-        clientPhone: clientPhone.trim(),
+        phone: phoneInput.trim(),
+        name: clientName,
         barberId: selectedBarber?.id ?? null,
         serviceId: selectedService?.id ?? null,
         date: selectedDate,
@@ -96,7 +125,7 @@ export default function ReservarPage({ params }: { params: Promise<{ slug: strin
     const data = await res.json();
     setSubmitting(false);
     if (data.success) {
-      setResult({ clientId: data.clientId });
+      setResultClientId(data.clientId);
       setStep('done');
     }
   };
@@ -109,8 +138,8 @@ export default function ReservarPage({ params }: { params: Promise<{ slug: strin
     );
   }
 
-  const steps: Step[] = ['service', 'barber', 'date', 'time', 'contact'];
-  const stepIndex = steps.indexOf(step as Step);
+  const progressSteps: Step[] = ['service', 'barber', 'date', 'time'];
+  const stepIndex = progressSteps.indexOf(step as typeof progressSteps[0]);
 
   return (
     <div style={{ minHeight: '100vh', background: '#0a0a0a', color: '#e5e5e5', fontFamily: 'system-ui, sans-serif' }}>
@@ -123,9 +152,10 @@ export default function ReservarPage({ params }: { params: Promise<{ slug: strin
         </div>
       </div>
 
-      {step !== 'done' && (
+      {/* Progress bar — only for steps service/barber/date/time */}
+      {stepIndex >= 0 && step !== 'done' && (
         <div style={{ display: 'flex', gap: 4, padding: '20px 24px 0', maxWidth: 560, margin: '0 auto' }}>
-          {steps.map((s, i) => (
+          {progressSteps.map((s, i) => (
             <div key={s} style={{
               flex: 1, height: 3, borderRadius: 2,
               background: i <= stepIndex ? gold : '#2a2a2a',
@@ -137,7 +167,96 @@ export default function ReservarPage({ params }: { params: Promise<{ slug: strin
 
       <div style={{ maxWidth: 560, margin: '0 auto', padding: '24px' }}>
 
-        {/* STEP: SERVICE */}
+        {/* ── STEP: PHONE ── */}
+        {step === 'phone' && (
+          <div>
+            <h2 style={{ fontSize: 22, marginBottom: 4 }}>¿Cuál es tu número de WhatsApp?</h2>
+            <p style={{ color: '#666', fontSize: 14, marginBottom: 20 }}>Usamos tu número para guardar tu historial y puntos de fidelización.</p>
+
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+              <input
+                value={phoneInput}
+                onChange={e => { setPhoneInput(e.target.value); setPhoneChecked(false); setFoundClient(null); setIsNewClient(false); }}
+                onKeyDown={e => e.key === 'Enter' && handlePhoneContinue()}
+                placeholder="Ej: 987 654 321"
+                type="tel"
+                style={{
+                  width: '100%', background: '#1c1c1c', border: '1px solid #2a2a2a',
+                  borderRadius: 8, padding: '14px', color: '#e5e5e5', fontSize: 16,
+                  outline: 'none', boxSizing: 'border-box',
+                }}
+              />
+
+              {!phoneChecked && (
+                <button
+                  onClick={handlePhoneContinue}
+                  disabled={!phoneInput.trim() || phoneLoading}
+                  style={{
+                    background: !phoneInput.trim() || phoneLoading ? '#333' : gold,
+                    color: '#0a0a0a', fontWeight: 700, padding: '14px', borderRadius: 8,
+                    border: 'none', cursor: !phoneInput.trim() || phoneLoading ? 'not-allowed' : 'pointer',
+                    fontSize: 16, width: '100%',
+                  }}>
+                  {phoneLoading ? 'Buscando...' : 'Continuar'}
+                </button>
+              )}
+
+              {/* Found client */}
+              {phoneChecked && foundClient && (
+                <div>
+                  <div style={{ background: '#0d1f0d', border: '1px solid #22c55e44', borderRadius: 10, padding: '14px 16px', marginBottom: 14 }}>
+                    <p style={{ margin: 0, fontWeight: 600, color: '#22c55e', fontSize: 15 }}>
+                      ¡Hola {foundClient.name}! 👋
+                    </p>
+                    <p style={{ margin: '4px 0 0', fontSize: 13, color: '#aaa' }}>
+                      Tienes {foundClient.loyaltyPoints}/5 sellos acumulados
+                    </p>
+                  </div>
+                  <button onClick={handleProceedToBooking} style={{
+                    background: gold, color: '#0a0a0a', fontWeight: 700, padding: '14px', borderRadius: 8,
+                    border: 'none', cursor: 'pointer', fontSize: 16, width: '100%',
+                  }}>
+                    Elegir servicio →
+                  </button>
+                </div>
+              )}
+
+              {/* New client */}
+              {phoneChecked && isNewClient && (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+                  <div style={{ background: '#1a140a', border: '1px solid #C9A84C44', borderRadius: 10, padding: '12px 14px' }}>
+                    <p style={{ margin: 0, fontSize: 13, color: '#C9A84C' }}>¡Bienvenido! ¿Cuál es tu nombre?</p>
+                  </div>
+                  <input
+                    value={newName}
+                    onChange={e => setNewName(e.target.value)}
+                    onKeyDown={e => e.key === 'Enter' && newName.trim() && handleProceedToBooking()}
+                    placeholder="Tu nombre completo *"
+                    autoFocus
+                    style={{
+                      width: '100%', background: '#1c1c1c', border: '1px solid #2a2a2a',
+                      borderRadius: 8, padding: '14px', color: '#e5e5e5', fontSize: 15,
+                      outline: 'none', boxSizing: 'border-box',
+                    }}
+                  />
+                  <button
+                    onClick={handleProceedToBooking}
+                    disabled={!newName.trim()}
+                    style={{
+                      background: !newName.trim() ? '#333' : gold,
+                      color: '#0a0a0a', fontWeight: 700, padding: '14px', borderRadius: 8,
+                      border: 'none', cursor: !newName.trim() ? 'not-allowed' : 'pointer',
+                      fontSize: 16, width: '100%',
+                    }}>
+                    Continuar →
+                  </button>
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+
+        {/* ── STEP: SERVICE ── */}
         {step === 'service' && (
           <div>
             <h2 style={{ fontSize: 22, marginBottom: 4 }}>¿Qué servicio quieres?</h2>
@@ -148,7 +267,7 @@ export default function ReservarPage({ params }: { params: Promise<{ slug: strin
                   style={{
                     ...cardStyle, padding: '16px 20px', cursor: 'pointer', border: '1px solid #2a2a2a',
                     display: 'flex', justifyContent: 'space-between', alignItems: 'center',
-                    color: '#e5e5e5', textAlign: 'left', width: '100%', transition: 'border-color 0.2s',
+                    color: '#e5e5e5', textAlign: 'left', width: '100%',
                   }}
                   onMouseEnter={e => (e.currentTarget.style.borderColor = gold)}
                   onMouseLeave={e => (e.currentTarget.style.borderColor = '#2a2a2a')}
@@ -161,17 +280,14 @@ export default function ReservarPage({ params }: { params: Promise<{ slug: strin
                 </button>
               ))}
               <button onClick={() => { setSelectedService(null); setStep('barber'); }}
-                style={{
-                  background: 'transparent', border: '1px dashed #2a2a2a', borderRadius: 12,
-                  padding: '14px', cursor: 'pointer', color: '#666', fontSize: 14,
-                }}>
+                style={{ background: 'transparent', border: '1px dashed #2a2a2a', borderRadius: 12, padding: '14px', cursor: 'pointer', color: '#666', fontSize: 14 }}>
                 Continuar sin elegir servicio
               </button>
             </div>
           </div>
         )}
 
-        {/* STEP: BARBER */}
+        {/* ── STEP: BARBER ── */}
         {step === 'barber' && (
           <div>
             <h2 style={{ fontSize: 22, marginBottom: 4 }}>¿Con quién prefieres?</h2>
@@ -181,8 +297,7 @@ export default function ReservarPage({ params }: { params: Promise<{ slug: strin
                 <button key={b.id} onClick={() => { setSelectedBarber(b); setStep('date'); }}
                   style={{
                     ...cardStyle, padding: '16px 20px', cursor: 'pointer', border: '1px solid #2a2a2a',
-                    display: 'flex', alignItems: 'center', gap: 14,
-                    color: '#e5e5e5', width: '100%',
+                    display: 'flex', alignItems: 'center', gap: 14, color: '#e5e5e5', width: '100%',
                   }}
                   onMouseEnter={e => (e.currentTarget.style.borderColor = gold)}
                   onMouseLeave={e => (e.currentTarget.style.borderColor = '#2a2a2a')}
@@ -192,17 +307,14 @@ export default function ReservarPage({ params }: { params: Promise<{ slug: strin
                 </button>
               ))}
               <button onClick={() => { setSelectedBarber(null); setStep('date'); }}
-                style={{
-                  background: 'transparent', border: '1px dashed #2a2a2a', borderRadius: 12,
-                  padding: '14px', cursor: 'pointer', color: '#666', fontSize: 14,
-                }}>
+                style={{ background: 'transparent', border: '1px dashed #2a2a2a', borderRadius: 12, padding: '14px', cursor: 'pointer', color: '#666', fontSize: 14 }}>
                 Cualquier barbero disponible
               </button>
             </div>
           </div>
         )}
 
-        {/* STEP: DATE */}
+        {/* ── STEP: DATE ── */}
         {step === 'date' && (
           <div>
             <h2 style={{ fontSize: 22, marginBottom: 4 }}>¿Qué día?</h2>
@@ -231,7 +343,7 @@ export default function ReservarPage({ params }: { params: Promise<{ slug: strin
           </div>
         )}
 
-        {/* STEP: TIME */}
+        {/* ── STEP: TIME ── */}
         {step === 'time' && (
           <div>
             <h2 style={{ fontSize: 22, marginBottom: 4 }}>¿A qué hora?</h2>
@@ -241,10 +353,10 @@ export default function ReservarPage({ params }: { params: Promise<{ slug: strin
             {slotsLoading ? (
               <p style={{ color: '#555', textAlign: 'center', padding: 32 }}>Verificando disponibilidad...</p>
             ) : (
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 8 }}>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 8, marginBottom: 20 }}>
                 {slots.map(slot => (
                   <button key={slot.time} disabled={!slot.available}
-                    onClick={() => { setSelectedTime(slot.time); setStep('contact'); }}
+                    onClick={() => setSelectedTime(slot.time)}
                     style={{
                       ...cardStyle, padding: '12px 8px', cursor: slot.available ? 'pointer' : 'not-allowed',
                       border: `1px solid ${selectedTime === slot.time ? gold : slot.available ? '#2a2a2a' : '#1a1a1a'}`,
@@ -262,61 +374,16 @@ export default function ReservarPage({ params }: { params: Promise<{ slug: strin
                 )}
               </div>
             )}
-            <button onClick={() => setStep('date')} style={{ marginTop: 20, background: 'transparent', border: 'none', color: '#666', cursor: 'pointer', fontSize: 14 }}>
-              ← Cambiar día
-            </button>
-          </div>
-        )}
 
-        {/* STEP: CONTACT */}
-        {step === 'contact' && (
-          <div>
-            <h2 style={{ fontSize: 22, marginBottom: 4 }}>Tus datos</h2>
-            <p style={{ color: '#666', fontSize: 14, marginBottom: 8 }}>
-              {formatDate(selectedDate)} · {selectedTime}
-              {selectedService ? ` · ${selectedService.name}` : ''}
-              {selectedBarber ? ` · ${selectedBarber.name}` : ''}
-            </p>
-            <div style={{ background: '#161616', border: `1px solid ${gold}`, borderRadius: 10, padding: '14px 16px', marginBottom: 20 }}>
-              <p style={{ margin: 0, fontSize: 13, color: '#aaa' }}>
-                💡 Si ya reservaste antes, usa el mismo número para ver tu historial.
-              </p>
-            </div>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
-              <div>
-                <label style={{ fontSize: 13, color: '#aaa', display: 'block', marginBottom: 6 }}>Tu nombre *</label>
-                <input
-                  value={clientName}
-                  onChange={e => setClientName(e.target.value)}
-                  placeholder="Ej: Carlos López"
-                  style={{
-                    width: '100%', background: '#1c1c1c', border: '1px solid #2a2a2a',
-                    borderRadius: 8, padding: '12px 14px', color: '#e5e5e5', fontSize: 15,
-                    outline: 'none', boxSizing: 'border-box',
-                  }}
-                />
-              </div>
-              <div>
-                <label style={{ fontSize: 13, color: '#aaa', display: 'block', marginBottom: 6 }}>WhatsApp / Celular *</label>
-                <input
-                  value={clientPhone}
-                  onChange={e => setClientPhone(e.target.value)}
-                  placeholder="Ej: 987654321"
-                  type="tel"
-                  style={{
-                    width: '100%', background: '#1c1c1c', border: '1px solid #2a2a2a',
-                    borderRadius: 8, padding: '12px 14px', color: '#e5e5e5', fontSize: 15,
-                    outline: 'none', boxSizing: 'border-box',
-                  }}
-                />
-              </div>
-              <div>
-                <label style={{ fontSize: 13, color: '#aaa', display: 'block', marginBottom: 6 }}>Notas (opcional)</label>
+            {/* Notes */}
+            {selectedTime && (
+              <div style={{ marginBottom: 16 }}>
+                <label style={{ fontSize: 13, color: '#aaa', display: 'block', marginBottom: 6 }}>Nota para el barbero (opcional)</label>
                 <textarea
                   value={notes}
                   onChange={e => setNotes(e.target.value)}
                   placeholder="Alguna indicación especial..."
-                  rows={3}
+                  rows={2}
                   style={{
                     width: '100%', background: '#1c1c1c', border: '1px solid #2a2a2a',
                     borderRadius: 8, padding: '12px 14px', color: '#e5e5e5', fontSize: 14,
@@ -324,40 +391,60 @@ export default function ReservarPage({ params }: { params: Promise<{ slug: strin
                   }}
                 />
               </div>
+            )}
+
+            {selectedTime && (
               <button
                 onClick={handleSubmit}
-                disabled={!clientName.trim() || !clientPhone.trim() || submitting}
+                disabled={submitting}
                 style={{
-                  background: (!clientName.trim() || !clientPhone.trim() || submitting) ? '#333' : gold,
+                  background: submitting ? '#333' : gold,
                   color: '#0a0a0a', fontWeight: 700, padding: '14px', borderRadius: 8,
-                  border: 'none', cursor: (!clientName.trim() || !clientPhone.trim() || submitting) ? 'not-allowed' : 'pointer',
+                  border: 'none', cursor: submitting ? 'not-allowed' : 'pointer',
                   fontSize: 16, width: '100%',
                 }}>
                 {submitting ? 'Enviando...' : 'Confirmar reserva'}
               </button>
-            </div>
+            )}
+
+            <button onClick={() => setStep('date')} style={{ marginTop: 16, background: 'transparent', border: 'none', color: '#666', cursor: 'pointer', fontSize: 14 }}>
+              ← Cambiar día
+            </button>
           </div>
         )}
 
-        {/* STEP: DONE */}
-        {step === 'done' && result && (
+        {/* ── STEP: DONE ── */}
+        {step === 'done' && (
           <div style={{ textAlign: 'center', paddingTop: 32 }}>
             <div style={{ fontSize: 64, marginBottom: 16 }}>🎉</div>
             <h2 style={{ fontSize: 26, marginBottom: 8 }}>¡Reserva enviada!</h2>
             <p style={{ color: '#aaa', fontSize: 15, marginBottom: 4 }}>
               Tu cita está <strong style={{ color: gold }}>pendiente de confirmación</strong>.
             </p>
-            <p style={{ color: '#666', fontSize: 14, marginBottom: 32 }}>
+            <p style={{ color: '#666', fontSize: 14, marginBottom: 24 }}>
               La barbería confirmará tu reserva a la brevedad.
             </p>
+
+            {/* Loyalty summary */}
+            {(foundClient || isNewClient) && (
+              <div style={{ background: '#161616', border: '1px solid #2a2a2a', borderRadius: 10, padding: 16, marginBottom: 20, textAlign: 'left' }}>
+                <p style={{ margin: 0, fontSize: 13, color: '#aaa' }}>
+                  Tu tarjeta de fidelización:{' '}
+                  <strong style={{ color: gold }}>
+                    {foundClient ? foundClient.loyaltyPoints : 0}/5 sellos
+                  </strong>
+                </p>
+              </div>
+            )}
+
+            <p style={{ fontSize: 12, color: '#555', marginBottom: 10 }}>Guarda tu link personal:</p>
             <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-              <a href={`/${slug}/mi-cuenta/${result.clientId}`}
+              <a href={`/${slug}/mi-cuenta/${resultClientId}`}
                 style={{
                   display: 'block', background: '#161616', border: `1px solid ${gold}`,
-                  borderRadius: 8, padding: '14px', color: gold, textDecoration: 'none',
-                  fontWeight: 600,
+                  borderRadius: 8, padding: '14px', color: gold, textDecoration: 'none', fontWeight: 600,
                 }}>
-                Ver mis citas
+                Ver mis citas y puntos
               </a>
               <a href={`/${slug}`}
                 style={{

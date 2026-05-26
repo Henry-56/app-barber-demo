@@ -1,61 +1,46 @@
 import { NextResponse } from 'next/server';
 import { db } from '@/src/lib/drizzle';
-import { barbershops, clients, appointments, services } from '@/src/lib/schema';
-import { eq, and } from 'drizzle-orm';
+import { barbershops, appointments, services } from '@/src/lib/schema';
+import { eq } from 'drizzle-orm';
+import { findOrCreateClient } from '@/src/lib/clients';
 
 export async function POST(req: Request, { params }: { params: Promise<{ slug: string }> }) {
   const { slug } = await params;
 
-  const [shop] = await db
-    .select()
-    .from(barbershops)
-    .where(eq(barbershops.slug, slug))
-    .limit(1);
-
+  const [shop] = await db.select().from(barbershops).where(eq(barbershops.slug, slug)).limit(1);
   if (!shop) return NextResponse.json({ error: 'Not found' }, { status: 404 });
 
   const body = await req.json();
-  const { clientName, clientPhone, barberId, serviceId, date, time, notes } = body;
+  const { phone, name, barberId, serviceId, date, time, notes } = body;
 
-  if (!clientName || !clientPhone || !date || !time) {
+  if (!phone || !date || !time) {
     return NextResponse.json({ error: 'Datos incompletos' }, { status: 400 });
   }
 
-  // Normalize phone
-  const phone = clientPhone.replace(/\D/g, '');
-
-  // Find or create client
-  let [client] = await db
-    .select()
-    .from(clients)
-    .where(and(eq(clients.barbershopId, shop.id), eq(clients.phone, phone)))
-    .limit(1);
-
-  if (!client) {
-    const [newClient] = await db
-      .insert(clients)
-      .values({
-        barbershopId: shop.id,
-        name: clientName,
-        phone,
-        source: 'public',
-      })
-      .returning();
-    client = newClient;
+  let result: Awaited<ReturnType<typeof findOrCreateClient>>;
+  try {
+    result = await findOrCreateClient({
+      barbershopId: shop.id,
+      phone,
+      name,
+      source: 'public_booking',
+    });
+  } catch (e) {
+    if (e instanceof Error && e.message === 'NAME_REQUIRED') {
+      return NextResponse.json({ needsName: true });
+    }
+    throw e;
   }
 
-  // Build scheduledAt
+  const { client } = result;
+
   const scheduledAt = new Date(`${date}T${time}:00`);
 
-  // Get service name/price if serviceId provided
   let serviceName: string | null = null;
   let servicePrice: number | null = null;
   if (serviceId) {
     const [svc] = await db.select().from(services).where(eq(services.id, serviceId)).limit(1);
-    if (svc) {
-      serviceName = svc.name;
-      servicePrice = Number(svc.price);
-    }
+    if (svc) { serviceName = svc.name; servicePrice = Number(svc.price); }
   }
 
   const [appointment] = await db
@@ -70,7 +55,7 @@ export async function POST(req: Request, { params }: { params: Promise<{ slug: s
       price: servicePrice,
       status: 'pending_confirmation',
       notes: notes ?? null,
-      source: 'public',
+      source: 'public_booking',
     })
     .returning();
 
