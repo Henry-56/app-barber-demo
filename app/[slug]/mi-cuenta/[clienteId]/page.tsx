@@ -2,7 +2,7 @@ import { notFound } from 'next/navigation';
 import Link from 'next/link';
 
 async function getClientData(slug: string, clientId: string) {
-  const base = process.env.NEXT_PUBLIC_BASE_URL ?? process.env.AUTH_URL ?? 'http://localhost:3000';
+  const base = process.env.NEXT_PUBLIC_BASE_URL ?? (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : null) ?? 'http://localhost:3000';
   const res = await fetch(`${base}/api/public/${slug}/client/${clientId}`, { cache: 'no-store' });
   if (!res.ok) return null;
   return res.json();

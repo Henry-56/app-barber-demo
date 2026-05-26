@@ -2,7 +2,7 @@ import { notFound } from 'next/navigation';
 import Link from 'next/link';
 
 async function getShopData(slug: string) {
-  const baseUrl = process.env.NEXT_PUBLIC_BASE_URL ?? process.env.AUTH_URL ?? 'http://localhost:3000';
+  const baseUrl = process.env.NEXT_PUBLIC_BASE_URL ?? (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : null) ?? 'http://localhost:3000';
   const res = await fetch(`${baseUrl}/api/public/${slug}`, { next: { revalidate: 60 } });
   if (!res.ok) return null;
   return res.json();
