@@ -27,6 +27,7 @@ const cardStyle = { background: '#161616', border: '1px solid #2a2a2a', borderRa
 export default function ReservarPage({ params }: { params: Promise<{ slug: string }> }) {
   const { slug } = use(params);
   const [shop, setShop] = useState<Shop | null>(null);
+  const [shopNotFound, setShopNotFound] = useState(false);
   const [step, setStep] = useState<Step>('phone');
 
   // Phone step state
@@ -51,8 +52,9 @@ export default function ReservarPage({ params }: { params: Promise<{ slug: strin
 
   useEffect(() => {
     fetch(`/api/public/${slug}`)
-      .then(r => r.json())
+      .then(r => { if (!r.ok) { setShopNotFound(true); return null; } return r.json(); })
       .then(data => {
+        if (!data) return;
         setShop(data);
         const dates: string[] = [];
         const today = new Date();
@@ -129,6 +131,16 @@ export default function ReservarPage({ params }: { params: Promise<{ slug: strin
       setStep('done');
     }
   };
+
+  if (shopNotFound) {
+    return (
+      <div style={{ minHeight: '100vh', background: '#0a0a0a', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 12 }}>
+        <p style={{ color: '#e5e5e5', fontSize: 18, fontWeight: 700 }}>Barbería no encontrada</p>
+        <p style={{ color: '#666', fontSize: 14 }}>El enlace que usaste no corresponde a ninguna barbería registrada.</p>
+        <a href="/" style={{ color: '#C9A84C', fontSize: 14 }}>Volver al inicio</a>
+      </div>
+    );
+  }
 
   if (!shop) {
     return (
