@@ -2,6 +2,7 @@
 
 import React, { useState, useEffect } from 'react';
 import { Gift, Star, Filter } from 'lucide-react';
+import { buildWaMessage, type ShopWaData } from '@/src/lib/whatsapp-manual';
 
 type Client = {
   id: string; name: string; phone: string;
@@ -13,13 +14,31 @@ const LOYALTY_MAX = 5;
 
 type FilterKey = 'all' | 'ready' | 'almost';
 
-function LoyaltyCard({ client }: { client: Client }) {
+function LoyaltyCard({ client, shop, onWaSent }: { client: Client; shop: ShopWaData | null; onWaSent?: (id: string) => void }) {
   const pts = client.loyaltyPoints;
-  const isReady = pts === 0 && client.loyaltyRedeemed > 0 && client.totalVisits >= LOYALTY_MAX;
-  // Simplification: pts===0 after redeem means they just redeemed
   const displayPts = pts;
   const isComplete = displayPts >= LOYALTY_MAX;
   const isAlmost = displayPts === LOYALTY_MAX - 1;
+  const [waState, setWaState] = useState<'idle' | 'opened' | 'confirmed'>('idle');
+  const [waMsg, setWaMsg] = useState('');
+
+  const handleWaClick = () => {
+    if (!shop) return;
+    const { url, message } = buildWaMessage(shop, 'fidelizacion', client.phone, { clientName: client.name });
+    window.open(url, '_blank');
+    setWaMsg(message);
+    setWaState('opened');
+  };
+
+  const handleWaConfirm = async (confirmed: boolean) => {
+    await fetch('/api/dashboard/whatsapp-log', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ clientId: client.id, type: 'fidelizacion', message: waMsg, confirmed }),
+    });
+    setWaState(confirmed ? 'confirmed' : 'idle');
+    if (confirmed && onWaSent) onWaSent(client.id);
+  };
 
   return (
     <div className="rounded-2xl border p-4 transition-all hover:border-[#C9A84C40]" style={{ backgroundColor: '#161616', borderColor: '#2a2a2a' }}>
@@ -71,6 +90,39 @@ function LoyaltyCard({ client }: { client: Client }) {
           {client.loyaltyRedeemed} {client.loyaltyRedeemed === 1 ? 'canje' : 'canjes'} realizados
         </p>
       )}
+
+      {/* Botón WhatsApp solo para clientes con 5 sellos */}
+      {isComplete && (
+        <div className="mt-3">
+          {waState === 'confirmed' ? (
+            <p className="text-xs font-medium" style={{ color: '#22c55e' }}>✓ Mensaje de corte gratis enviado</p>
+          ) : (
+            <>
+              <button
+                onClick={handleWaClick}
+                disabled={!shop}
+                className="w-full py-2 rounded-lg text-xs font-bold"
+                style={{ backgroundColor: '#25D36620', color: '#25D366', border: '1px solid #25D36630' }}>
+                📱 Avisar corte gratis por WhatsApp
+              </button>
+              {waState === 'opened' && (
+                <div className="mt-2 flex items-center gap-2 rounded-lg px-3 py-2" style={{ backgroundColor: '#25D36610', border: '1px solid #25D36620' }}>
+                  <span className="text-xs flex-1" style={{ color: '#a0a0a0' }}>¿Enviaste el mensaje?</span>
+                  <button onClick={() => handleWaConfirm(true)}
+                    className="text-xs font-bold px-2 py-1 rounded-md"
+                    style={{ backgroundColor: '#25D36630', color: '#25D366' }}>
+                    Sí
+                  </button>
+                  <button onClick={() => handleWaConfirm(false)}
+                    className="text-xs px-2 py-1 rounded-md" style={{ color: '#555' }}>
+                    No
+                  </button>
+                </div>
+              )}
+            </>
+          )}
+        </div>
+      )}
     </div>
   );
 }
@@ -79,9 +131,11 @@ export default function FidelizacionPage() {
   const [clients, setClients] = useState<Client[]>([]);
   const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState<FilterKey>('all');
+  const [shop, setShop] = useState<ShopWaData | null>(null);
 
   useEffect(() => {
     fetch('/api/v2/clients').then(r => r.json()).then(data => { setClients(data); setLoading(false); }).catch(() => setLoading(false));
+    fetch('/api/dashboard/settings').then(r => r.json()).then(setShop).catch(() => {});
   }, []);
 
   const filtered = clients.filter(c => {
@@ -158,7 +212,7 @@ export default function FidelizacionPage() {
         </div>
       ) : (
         <div className="grid gap-3 sm:grid-cols-2">
-          {filtered.map(c => <LoyaltyCard key={c.id} client={c} />)}
+          {filtered.map(c => <LoyaltyCard key={c.id} client={c} shop={shop} />)}
         </div>
       )}
     </div>

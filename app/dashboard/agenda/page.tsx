@@ -2,6 +2,7 @@
 
 import React, { useState, useEffect, useCallback } from 'react';
 import { Plus, CheckCircle, XCircle, UserX, Loader2, CalendarDays, ChevronLeft, ChevronRight, Clock } from 'lucide-react';
+import { buildWaMessage, type ShopWaData } from '@/src/lib/whatsapp-manual';
 
 type AppointmentRow = {
   appointment: {
@@ -33,12 +34,18 @@ type PendingAction = {
 function PendingPanel({ onRefresh }: { onRefresh: () => void }) {
   const [pending, setPending] = useState<PendingAction[]>([]);
   const [acting, setActing] = useState<string | null>(null);
+  const [shop, setShop] = useState<ShopWaData | null>(null);
+  const [waOpened, setWaOpened] = useState<Record<string, { message: string; clientId: string }>>({});
+  const [waConfirmed, setWaConfirmed] = useState<Set<string>>(new Set());
 
   const load = useCallback(() => {
     fetch('/api/dashboard/pending-actions').then(r => r.json()).then(setPending).catch(() => {});
   }, []);
 
   useEffect(() => { load(); }, [load]);
+  useEffect(() => {
+    fetch('/api/dashboard/settings').then(r => r.json()).then(setShop).catch(() => {});
+  }, []);
 
   if (pending.length === 0) return null;
 
@@ -48,6 +55,32 @@ function PendingPanel({ onRefresh }: { onRefresh: () => void }) {
     load();
     onRefresh();
     setActing(null);
+  };
+
+  const handleWaClick = (p: PendingAction) => {
+    if (!shop) return;
+    const dt = new Date(p.scheduledAt);
+    const { url, message } = buildWaMessage(shop, 'confirmacion', p.clientPhone, {
+      clientName: p.clientName,
+      date: dt.toLocaleDateString('es-PE', { weekday: 'long', day: 'numeric', month: 'long' }),
+      time: dt.toLocaleTimeString('es-PE', { hour: '2-digit', minute: '2-digit' }),
+      service: p.service ?? 'Corte',
+      barberName: p.barberName ?? '',
+    });
+    window.open(url, '_blank');
+    setWaOpened(prev => ({ ...prev, [p.id]: { message, clientId: p.clientId } }));
+  };
+
+  const handleWaConfirm = async (id: string, confirmed: boolean) => {
+    const wa = waOpened[id];
+    if (!wa) return;
+    await fetch('/api/dashboard/whatsapp-log', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ clientId: wa.clientId, type: 'confirmacion', message: wa.message, confirmed }),
+    });
+    setWaOpened(prev => { const n = { ...prev }; delete n[id]; return n; });
+    if (confirmed) setWaConfirmed(prev => new Set(prev).add(id));
   };
 
   return (
@@ -63,6 +96,8 @@ function PendingPanel({ onRefresh }: { onRefresh: () => void }) {
           const dt = new Date(p.scheduledAt);
           const dateStr = dt.toLocaleDateString('es-PE', { weekday: 'short', day: 'numeric', month: 'short' });
           const timeStr = dt.toLocaleTimeString('es-PE', { hour: '2-digit', minute: '2-digit' });
+          const waState = waOpened[p.id];
+          const waDone = waConfirmed.has(p.id);
           return (
             <div key={p.id} className="rounded-xl border p-3" style={{ backgroundColor: '#161616', borderColor: '#2a2a2a' }}>
               <div className="flex items-start justify-between gap-2 mb-2">
@@ -80,11 +115,13 @@ function PendingPanel({ onRefresh }: { onRefresh: () => void }) {
                 </span>
               </div>
               <div className="flex gap-2">
-                <a href={`https://wa.me/51${p.clientPhone.replace(/\D/g,'')}`} target="_blank" rel="noreferrer"
+                <button
+                  onClick={() => handleWaClick(p)}
+                  disabled={!shop}
                   className="px-2 py-1.5 rounded-lg text-xs font-medium"
-                  style={{ backgroundColor: '#25D36620', color: '#25D366', border: '1px solid #25D36630' }}>
-                  WhatsApp
-                </a>
+                  style={{ backgroundColor: '#25D36620', color: waDone ? '#22c55e' : '#25D366', border: `1px solid ${waDone ? '#22c55e30' : '#25D36630'}` }}>
+                  {waDone ? '✓ Enviado' : '📱 WhatsApp'}
+                </button>
                 <button onClick={() => act(p.id, 'confirm')} disabled={acting === p.id}
                   className="flex-1 py-1.5 rounded-lg text-xs font-bold"
                   style={{ backgroundColor: '#22c55e20', color: '#22c55e', border: '1px solid #22c55e30' }}>
@@ -96,6 +133,22 @@ function PendingPanel({ onRefresh }: { onRefresh: () => void }) {
                   ✕ Rechazar
                 </button>
               </div>
+              {/* Prompt de confirmación de envío */}
+              {waState && !waDone && (
+                <div className="mt-2 flex items-center gap-2 rounded-lg px-3 py-2" style={{ backgroundColor: '#25D36610', border: '1px solid #25D36620' }}>
+                  <span className="text-xs flex-1" style={{ color: '#a0a0a0' }}>¿Enviaste el mensaje?</span>
+                  <button onClick={() => handleWaConfirm(p.id, true)}
+                    className="text-xs font-bold px-2 py-1 rounded-md"
+                    style={{ backgroundColor: '#25D36630', color: '#25D366' }}>
+                    Sí, lo envié
+                  </button>
+                  <button onClick={() => handleWaConfirm(p.id, false)}
+                    className="text-xs px-2 py-1 rounded-md"
+                    style={{ color: '#555' }}>
+                    No
+                  </button>
+                </div>
+              )}
             </div>
           );
         })}

@@ -3,14 +3,19 @@ import { db } from '@/src/lib/drizzle';
 import { whatsappMessages, clients } from '@/src/lib/schema';
 import { eq, and, gte, count, sql, desc } from 'drizzle-orm';
 import { MessageSquare, CheckCircle, XCircle } from 'lucide-react';
+import ActionsPanel from './actions-panel';
 
 const TYPE_LABELS: Record<string, string> = {
+  confirmacion: 'Confirmación',
+  recordatorio: 'Recordatorio',
+  recuperacion: 'Recuperación',
+  fidelizacion: 'Corte gratis',
+  bienvenida: 'Bienvenida',
   welcome: 'Bienvenida',
   reminder_24h: 'Recordatorio 24h',
   reminder_2h: 'Recordatorio 2h',
   recovery: 'Recuperación',
   loyalty_complete: 'Fidelización',
-  trial_reminder: 'Trial',
   bot: 'Bot',
   manual: 'Manual',
 };
@@ -61,8 +66,11 @@ export default async function WhatsappPage() {
     <div className="p-4 sm:p-6 max-w-4xl mx-auto space-y-5">
       <div>
         <h1 className="text-2xl font-bold text-white">WhatsApp</h1>
-        <p className="text-sm mt-0.5" style={{ color: '#a0a0a0' }}>Historial de mensajes automáticos</p>
+        <p className="text-sm mt-0.5" style={{ color: '#a0a0a0' }}>Acciones pendientes e historial de envíos</p>
       </div>
+
+      {/* Acciones pendientes del día */}
+      <ActionsPanel />
 
       {/* Stats del mes */}
       <div className="grid grid-cols-3 gap-3">
