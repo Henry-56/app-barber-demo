@@ -5,7 +5,10 @@ export function generateWhatsAppLink(phone: string, message: string): string {
 }
 
 export function fillTemplate(template: string, vars: Record<string, string>): string {
-  return template.replace(/\{\{(\w+)\}\}/g, (_, key) => vars[key] ?? `{{${key}}}`);
+  // Supports both {{var}} and {var} syntax
+  return template
+    .replace(/\{\{(\w+)\}\}/g, (_, key) => vars[key] ?? `{{${key}}}`)
+    .replace(/\{(\w+)\}/g,    (_, key) => vars[key] ?? `{${key}}`);
 }
 
 // ─── Click-to-Send system ─────────────────────────────────
@@ -46,7 +49,20 @@ export function buildWaMessage(
   const template = templateMap[type] || waDefaults[type];
   const baseUrl = process.env.NEXT_PUBLIC_BASE_URL ?? '';
   const allVars = { shopName: shop.name, bookingUrl: `${baseUrl}/${shop.slug}/reservar`, ...vars };
-  const message = fillTemplate(template, allVars);
+
+  // Spanish aliases so custom templates can use {nombre}, {fecha}, {hora}, etc.
+  const withAliases: Record<string, string> = {
+    ...allVars,
+    nombre:   allVars.clientName ?? '',
+    fecha:    allVars.date       ?? '',
+    hora:     allVars.time       ?? '',
+    servicio: allVars.service    ?? '',
+    barbero:  allVars.barberName ?? '',
+    negocio:  allVars.shopName   ?? '',
+    link:     allVars.bookingUrl ?? '',
+  };
+
+  const message = fillTemplate(template, withAliases);
   return { url: generateWhatsAppLink(clientPhone, message), message };
 }
 
