@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 import { auth } from '@/src/lib/auth';
 import { db } from '@/src/lib/drizzle';
-import { appointments, clients, barbers } from '@/src/lib/schema';
+import { appointments, clients, barbers, whatsappMessages } from '@/src/lib/schema';
 import { eq, and, gte, lte, inArray } from 'drizzle-orm';
 
 export async function GET() {
@@ -70,7 +70,25 @@ export async function GET() {
     .where(and(eq(clients.barbershopId, bid), eq(clients.isInactive, true)))
     .limit(10);
 
-  const total = reminders.length + noShows.length + loyalty.length + inactive.length;
+  // Clientes nuevos (últimos 7 días) sin bienvenida enviada
+  const sevenDaysAgo = new Date(now.getTime() - 7 * 86_400_000);
+  const recentClients = await db
+    .select({ id: clients.id, name: clients.name, phone: clients.phone, loyaltyPoints: clients.loyaltyPoints, createdAt: clients.createdAt })
+    .from(clients)
+    .where(and(eq(clients.barbershopId, bid), gte(clients.createdAt, sevenDaysAgo)));
 
-  return NextResponse.json({ reminders, noShows, loyalty, inactive, total });
+  const sentBienvenida = await db
+    .select({ clientId: whatsappMessages.clientId })
+    .from(whatsappMessages)
+    .where(and(
+      eq(whatsappMessages.barbershopId, bid),
+      eq(whatsappMessages.type, 'bienvenida'),
+      eq(whatsappMessages.confirmedSent, true),
+    ));
+  const sentBienvenidaIds = new Set(sentBienvenida.map(m => m.clientId));
+  const newClients = recentClients.filter(c => !sentBienvenidaIds.has(c.id));
+
+  const total = reminders.length + noShows.length + loyalty.length + inactive.length + newClients.length;
+
+  return NextResponse.json({ reminders, noShows, loyalty, inactive, newClients, total });
 }

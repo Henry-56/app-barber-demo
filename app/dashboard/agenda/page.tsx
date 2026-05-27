@@ -49,7 +49,32 @@ function PendingPanel({ onRefresh }: { onRefresh: () => void }) {
 
   if (pending.length === 0) return null;
 
+  const openConfirmWa = (p: PendingAction) => {
+    if (!shop) return;
+    const dt = new Date(p.scheduledAt);
+    const { url, message } = buildWaMessage(shop, 'confirmacion', p.clientPhone, {
+      clientName: p.clientName,
+      date: dt.toLocaleDateString('es-PE', { weekday: 'long', day: 'numeric', month: 'long' }),
+      time: dt.toLocaleTimeString('es-PE', { hour: '2-digit', minute: '2-digit' }),
+      service: p.service ?? 'Corte',
+      barberName: p.barberName ?? '',
+    });
+    window.open(url, '_blank');
+    // Log automático como "pendiente" — el barbero lo cierra enviando
+    fetch('/api/dashboard/whatsapp-log', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ clientId: p.clientId, type: 'confirmacion', message, confirmed: false }),
+    });
+    setWaConfirmed(prev => new Set(prev).add(p.id));
+  };
+
   const act = async (id: string, action: 'confirm' | 'reject') => {
+    // Al confirmar, abrir WhatsApp automáticamente con el mensaje de confirmación
+    if (action === 'confirm') {
+      const p = pending.find(x => x.id === id);
+      if (p) openConfirmWa(p);
+    }
     setActing(id);
     await fetch(`/api/dashboard/appointments/${id}/${action}`, { method: 'POST' });
     load();
