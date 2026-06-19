@@ -37,6 +37,12 @@ export async function GET(_req: Request, { params }: { params: Promise<{ slug: s
     openingHours: shop.openingHours,
     maxAdvanceDays: shop.maxAdvanceDays,
     minAdvanceHours: shop.minAdvanceHours,
+    depositEnabled: shop.depositEnabled,
+    depositAmount: shop.depositAmount,
+    depositMandatory: shop.depositMandatory,
+    paymentQrUrl: shop.paymentQrUrl,
+    paymentPhone: shop.paymentPhone,
+    paymentMethodLabel: shop.paymentMethodLabel,
     barbers: activeBarbers,
     services: activeServices,
   });

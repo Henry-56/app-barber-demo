@@ -26,6 +26,10 @@ export default async function DashboardLayout({ children }: { children: React.Re
     ? Math.ceil((new Date(shop.trialEndsAt).getTime() - Date.now()) / 86400000)
     : null;
 
+  if (shop?.subscriptionStatus === 'trial' && trialDaysLeft !== null && trialDaysLeft <= 0) {
+    redirect('/trial-expired');
+  }
+
   return (
     <SessionProviderWrapper>
       <DashboardShell shopName={shop?.name ?? 'Mi Barbería'} trialDaysLeft={trialDaysLeft}>

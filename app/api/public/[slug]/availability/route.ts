@@ -21,9 +21,8 @@ export async function GET(req: Request, { params }: { params: Promise<{ slug: st
 
   if (!shop) return NextResponse.json({ error: 'Not found' }, { status: 404 });
 
-  const date = new Date(`${dateStr}T00:00:00`);
-  const nextDay = new Date(date);
-  nextDay.setDate(date.getDate() + 1);
+  const date = new Date(`${dateStr}T00:00:00-05:00`); // Lima midnight
+  const nextDay = new Date(date.getTime() + 24 * 60 * 60 * 1000);
 
   const whereConditions = [
     eq(appointments.barbershopId, shop.id),
@@ -37,11 +36,12 @@ export async function GET(req: Request, { params }: { params: Promise<{ slug: st
     .where(and(...whereConditions));
 
   // Filter by barberId if provided, otherwise all occupied times
+  const LIMA_OFFSET_MS = 5 * 60 * 60 * 1000;
   const occupiedTimes = existing
     .filter(a => !barberId || a.barberId === barberId)
     .map(a => {
-      const d = new Date(a.scheduledAt);
-      return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+      const lima = new Date(new Date(a.scheduledAt).getTime() - LIMA_OFFSET_MS);
+      return `${String(lima.getUTCHours()).padStart(2, '0')}:${String(lima.getUTCMinutes()).padStart(2, '0')}`;
     });
 
   const slots = generateSlots(

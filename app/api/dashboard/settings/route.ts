@@ -3,6 +3,7 @@ import { auth } from '@/src/lib/auth';
 import { db } from '@/src/lib/drizzle';
 import { barbershops } from '@/src/lib/schema';
 import { eq } from 'drizzle-orm';
+import { isTrialActive, trialExpiredResponse } from '@/src/lib/trial-guard';
 
 export async function GET() {
   const session = await auth();
@@ -22,6 +23,7 @@ export async function GET() {
 export async function PUT(req: Request) {
   const session = await auth();
   if (!session?.user?.barbershopId) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+  if (!await isTrialActive(session.user.barbershopId)) return trialExpiredResponse();
 
   const body = await req.json();
 
@@ -32,6 +34,8 @@ export async function PUT(req: Request) {
     'whatsappTemplateConfirmacion', 'whatsappTemplateRecordatorio',
     'whatsappTemplateRecuperacion', 'whatsappTemplateFidelizacion',
     'whatsappTemplateBienvenida',
+    'depositEnabled', 'depositAmount', 'depositMandatory',
+    'paymentQrUrl', 'paymentPhone', 'paymentMethodLabel',
   ];
 
   // Handle slug separately — only allow if not yet changed

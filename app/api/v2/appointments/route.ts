@@ -4,6 +4,7 @@ import { db } from '@/src/lib/drizzle';
 import { appointments, clients, barbers } from '@/src/lib/schema';
 import { eq, and, gte, lte, desc } from 'drizzle-orm';
 import { sendWhatsAppMessage, templates } from '@/src/lib/whatsapp';
+import { isTrialActive, trialExpiredResponse } from '@/src/lib/trial-guard';
 
 export async function GET(req: Request) {
   const session = await auth();
@@ -40,6 +41,7 @@ export async function GET(req: Request) {
 export async function POST(req: Request) {
   const session = await auth();
   if (!session?.user?.barbershopId) return NextResponse.json({ error: 'No autorizado' }, { status: 401 });
+  if (!await isTrialActive(session.user.barbershopId)) return trialExpiredResponse();
 
   const { clientId, barberId, scheduledAt, service, price, notes } = await req.json();
 

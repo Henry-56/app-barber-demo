@@ -10,10 +10,15 @@ type Shop = {
   maxAdvanceDays: number; minAdvanceHours: number;
   openingHours: Record<string, { open: string; close: string; closed: boolean }> | null;
   whatsappTemplateConfirmacion: string | null;
-  whatsappTemplateRecordatorio: string | null;
   whatsappTemplateRecuperacion: string | null;
   whatsappTemplateFidelizacion: string | null;
   whatsappTemplateBienvenida: string | null;
+  depositEnabled: boolean | null;
+  depositAmount: string | null;
+  depositMandatory: boolean | null;
+  paymentQrUrl: string | null;
+  paymentPhone: string | null;
+  paymentMethodLabel: string | null;
 };
 
 const gold = '#C9A84C';
@@ -40,7 +45,7 @@ const DEFAULT_HOURS = {
   domingo: { open: '08:00', close: '20:00', closed: true },
 };
 
-type Tab = 'perfil' | 'servicios' | 'horarios' | 'whatsapp' | 'reservas';
+type Tab = 'perfil' | 'servicios' | 'horarios' | 'reservas' | 'whatsapp' | 'anticipo';
 
 export default function AjustesPage() {
   const [tab, setTab] = useState<Tab>('perfil');
@@ -67,10 +72,19 @@ export default function AjustesPage() {
 
   // WhatsApp templates
   const [tplConfirmacion, setTplConfirmacion] = useState('');
-  const [tplRecordatorio, setTplRecordatorio] = useState('');
   const [tplRecuperacion, setTplRecuperacion] = useState('');
   const [tplFidelizacion, setTplFidelizacion] = useState('');
   const [tplBienvenida, setTplBienvenida] = useState('');
+
+  // Anticipo
+  const [depositEnabled, setDepositEnabled] = useState(false);
+  const [depositAmount, setDepositAmount] = useState('');
+  const [depositMandatory, setDepositMandatory] = useState(false);
+  const [paymentQrUrl, setPaymentQrUrl] = useState('');
+  const [paymentPhone, setPaymentPhone] = useState('');
+  const [paymentMethodLabel, setPaymentMethodLabel] = useState('Yape');
+  const [qrUploading, setQrUploading] = useState(false);
+  const [depositError, setDepositError] = useState('');
 
   // New service form
   const [newSvcName, setNewSvcName] = useState('');
@@ -94,10 +108,15 @@ export default function AjustesPage() {
       setMinAdvanceHours(s.minAdvanceHours ?? 2);
       setHours(s.openingHours ?? DEFAULT_HOURS);
       setTplConfirmacion(s.whatsappTemplateConfirmacion ?? '');
-      setTplRecordatorio(s.whatsappTemplateRecordatorio ?? '');
       setTplRecuperacion(s.whatsappTemplateRecuperacion ?? '');
       setTplFidelizacion(s.whatsappTemplateFidelizacion ?? '');
       setTplBienvenida(s.whatsappTemplateBienvenida ?? '');
+      setDepositEnabled(s.depositEnabled ?? false);
+      setDepositAmount(s.depositAmount ? String(Number(s.depositAmount)) : '');
+      setDepositMandatory(s.depositMandatory ?? false);
+      setPaymentQrUrl(s.paymentQrUrl ?? '');
+      setPaymentPhone(s.paymentPhone ?? '');
+      setPaymentMethodLabel(s.paymentMethodLabel ?? 'Yape');
       setServices(svcs);
     });
   }, []);
@@ -147,7 +166,6 @@ export default function AjustesPage() {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         whatsappTemplateConfirmacion: tplConfirmacion,
-        whatsappTemplateRecordatorio: tplRecordatorio,
         whatsappTemplateRecuperacion: tplRecuperacion,
         whatsappTemplateFidelizacion: tplFidelizacion,
         whatsappTemplateBienvenida: tplBienvenida,
@@ -155,6 +173,51 @@ export default function AjustesPage() {
     });
     setSaving(false);
     showSaved();
+  };
+
+  const saveDeposit = async () => {
+    setDepositError('');
+    if (depositEnabled && !paymentQrUrl && !paymentPhone) {
+      setDepositError('Configura al menos un método de pago (QR o número de teléfono) para activar el anticipo.');
+      return;
+    }
+    setSaving(true);
+    await fetch('/api/dashboard/settings', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        depositEnabled,
+        depositAmount: depositAmount ? Number(depositAmount) : 0,
+        depositMandatory,
+        paymentQrUrl,
+        paymentPhone,
+        paymentMethodLabel,
+      }),
+    });
+    setSaving(false);
+    showSaved();
+  };
+
+  const handleQrUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    if (file.size > 3 * 1024 * 1024) {
+      setDepositError('La imagen debe ser menor a 3MB');
+      return;
+    }
+    setQrUploading(true);
+    const formData = new FormData();
+    formData.append('file', file);
+    try {
+      const res = await fetch('/api/dashboard/upload-qr', { method: 'POST', body: formData });
+      const data = await res.json();
+      if (data.url) setPaymentQrUrl(data.url);
+      else setDepositError(data.error ?? 'Error al subir imagen');
+    } catch {
+      setDepositError('Error al subir imagen');
+    }
+    setQrUploading(false);
+    e.target.value = '';
   };
 
   const addService = async () => {
@@ -189,12 +252,11 @@ export default function AjustesPage() {
     { key: 'horarios', label: 'Horarios' },
     { key: 'reservas', label: 'Reservas' },
     { key: 'whatsapp', label: 'WhatsApp' },
+    { key: 'anticipo', label: 'Anticipo' },
   ];
 
   if (!shop) {
-    return (
-      <div style={{ padding: 32, color: '#555' }}>Cargando ajustes...</div>
-    );
+    return <div style={{ padding: 32, color: '#555' }}>Cargando ajustes...</div>;
   }
 
   return (
@@ -218,12 +280,12 @@ export default function AjustesPage() {
       )}
 
       {/* Tabs */}
-      <div style={{ display: 'flex', gap: 4, marginBottom: 24, borderBottom: '1px solid #2a2a2a', paddingBottom: 0 }}>
+      <div style={{ display: 'flex', gap: 4, marginBottom: 24, borderBottom: '1px solid #2a2a2a', paddingBottom: 0, overflowX: 'auto' }}>
         {tabs.map(t => (
           <button key={t.key} onClick={() => setTab(t.key)} style={{
             background: 'transparent', border: 'none', cursor: 'pointer',
             padding: '10px 16px', fontSize: 14, fontWeight: tab === t.key ? 700 : 400,
-            color: tab === t.key ? gold : '#666',
+            color: tab === t.key ? gold : '#666', whiteSpace: 'nowrap',
             borderBottom: tab === t.key ? `2px solid ${gold}` : '2px solid transparent',
           }}>
             {t.label}
@@ -447,10 +509,9 @@ export default function AjustesPage() {
           <div style={{ display: 'flex', flexDirection: 'column', gap: 16, marginTop: 16 }}>
             {[
               { label: 'Confirmación de cita', value: tplConfirmacion, set: setTplConfirmacion },
-              { label: 'Recordatorio', value: tplRecordatorio, set: setTplRecordatorio },
               { label: 'Recuperación (cliente inactivo)', value: tplRecuperacion, set: setTplRecuperacion },
               { label: 'Fidelización (corte gratis)', value: tplFidelizacion, set: setTplFidelizacion },
-              { label: 'Bienvenida (primer visita)', value: tplBienvenida, set: setTplBienvenida },
+              { label: 'Bienvenida (primera visita)', value: tplBienvenida, set: setTplBienvenida },
             ].map(({ label, value, set }) => (
               <div key={label}>
                 <label style={labelStyle}>{label}</label>
@@ -464,6 +525,141 @@ export default function AjustesPage() {
               borderRadius: 8, border: 'none', cursor: 'pointer', fontSize: 14,
             }}>
               {saving ? 'Guardando...' : 'Guardar plantillas'}
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* ANTICIPO */}
+      {tab === 'anticipo' && (
+        <div style={cardStyle}>
+          <h2 style={{ margin: '0 0 4px', fontSize: 18 }}>Cobro de anticipo al agendar</h2>
+          <p style={{ margin: '0 0 20px', fontSize: 13, color: '#666' }}>
+            El cliente paga directo a tu Yape o Plin. Tú confirmas el pago manualmente desde la Agenda.
+          </p>
+
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
+
+            {/* Toggle principal */}
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '14px 16px', background: '#0a0a0a', borderRadius: 10, border: '1px solid #2a2a2a' }}>
+              <div>
+                <p style={{ margin: 0, fontWeight: 600, fontSize: 15 }}>Activar cobro de anticipo</p>
+                <p style={{ margin: '2px 0 0', fontSize: 12, color: '#666' }}>
+                  Se mostrará al cliente al agendar desde tu página pública
+                </p>
+              </div>
+              <label style={{ cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 8 }}>
+                <span style={{ fontSize: 13, color: depositEnabled ? gold : '#555' }}>
+                  {depositEnabled ? 'Activo' : 'Inactivo'}
+                </span>
+                <input type="checkbox" checked={depositEnabled} onChange={e => setDepositEnabled(e.target.checked)}
+                  style={{ accentColor: gold, width: 18, height: 18 }} />
+              </label>
+            </div>
+
+            {depositEnabled && (
+              <>
+                {/* Monto */}
+                <div>
+                  <label style={labelStyle}>Monto del anticipo (S/)</label>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                    <span style={{ color: '#aaa', fontSize: 14 }}>S/</span>
+                    <input type="number" value={depositAmount} min="1" step="1"
+                      onChange={e => setDepositAmount(e.target.value)}
+                      placeholder="Ej: 15"
+                      style={{ ...inputStyle, width: 120 }} />
+                  </div>
+                </div>
+
+                {/* Obligatorio */}
+                <div style={{ padding: '14px 16px', background: '#0a0a0a', borderRadius: 10, border: '1px solid #2a2a2a' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                    <div>
+                      <p style={{ margin: 0, fontWeight: 600, fontSize: 14 }}>¿Es obligatorio pagar para agendar?</p>
+                      <p style={{ margin: '2px 0 0', fontSize: 12, color: '#666' }}>
+                        {depositMandatory
+                          ? 'El cliente debe pagar el anticipo para confirmar la cita'
+                          : 'El cliente puede elegir "pagar el día de la cita"'}
+                      </p>
+                    </div>
+                    <input type="checkbox" checked={depositMandatory} onChange={e => setDepositMandatory(e.target.checked)}
+                      style={{ accentColor: gold, width: 18, height: 18 }} />
+                  </div>
+                </div>
+
+                <div style={{ borderTop: '1px solid #2a2a2a', paddingTop: 16 }}>
+                  <p style={{ margin: '0 0 12px', fontSize: 14, fontWeight: 600 }}>Métodos de pago disponibles</p>
+                  <p style={{ margin: '0 0 16px', fontSize: 12, color: '#666' }}>
+                    El cliente verá todos los métodos que configures aquí al mismo tiempo.
+                  </p>
+
+                  {/* QR de imagen */}
+                  <div style={{ marginBottom: 20 }}>
+                    <label style={{ ...labelStyle, fontWeight: 600 }}>QR de imagen (Yape o Plin)</label>
+                    {paymentQrUrl && (
+                      <div style={{ marginBottom: 12 }}>
+                        <img src={paymentQrUrl} alt="QR de pago" style={{
+                          width: 160, height: 160, objectFit: 'contain',
+                          border: '1px solid #2a2a2a', borderRadius: 8, background: '#fff', display: 'block',
+                        }} />
+                        <button type="button" onClick={() => setPaymentQrUrl('')}
+                          style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#ef4444', fontSize: 12, marginTop: 6, padding: 0 }}>
+                          Quitar imagen
+                        </button>
+                      </div>
+                    )}
+                    <label style={{
+                      display: 'inline-flex', alignItems: 'center', gap: 6,
+                      padding: '8px 16px', borderRadius: 8, cursor: qrUploading ? 'wait' : 'pointer',
+                      background: '#2a2a2a', fontSize: 13, color: '#aaa', border: 'none',
+                    }}>
+                      {qrUploading ? 'Subiendo...' : paymentQrUrl ? '↑ Cambiar imagen' : '+ Subir QR'}
+                      <input type="file" accept="image/*" onChange={handleQrUpload}
+                        disabled={qrUploading} style={{ display: 'none' }} />
+                    </label>
+                    <p style={{ margin: '6px 0 0', fontSize: 11, color: '#555' }}>
+                      PNG, JPG o WebP · máx. 3MB · Se aloja en Vercel Blob (requiere BLOB_READ_WRITE_TOKEN)
+                    </p>
+                  </div>
+
+                  {/* Número de teléfono */}
+                  <div style={{ marginBottom: 16 }}>
+                    <label style={{ ...labelStyle, fontWeight: 600 }}>Número de teléfono para Yape/Plin</label>
+                    <input value={paymentPhone} onChange={e => setPaymentPhone(e.target.value)}
+                      placeholder="Ej: 987654321"
+                      style={inputStyle} />
+                  </div>
+
+                  {/* Label del método */}
+                  <div>
+                    <label style={labelStyle}>Mostrar al cliente como</label>
+                    <select value={paymentMethodLabel} onChange={e => setPaymentMethodLabel(e.target.value)} style={inputStyle}>
+                      <option value="Yape">Yape</option>
+                      <option value="Plin">Plin</option>
+                      <option value="Yape o Plin">Yape o Plin</option>
+                    </select>
+                  </div>
+                </div>
+
+                {!paymentQrUrl && !paymentPhone && (
+                  <div style={{ background: '#1a1500', border: '1px solid #f59e0b30', borderRadius: 8, padding: '10px 14px', fontSize: 13, color: '#f59e0b' }}>
+                    ⚠️ Agrega al menos un método de pago para que los clientes puedan pagar el anticipo.
+                  </div>
+                )}
+              </>
+            )}
+
+            {depositError && (
+              <div style={{ background: '#1a0505', border: '1px solid #ef444430', borderRadius: 8, padding: '10px 14px', fontSize: 13, color: '#ef4444' }}>
+                {depositError}
+              </div>
+            )}
+
+            <button onClick={saveDeposit} disabled={saving} style={{
+              background: gold, color: '#0a0a0a', fontWeight: 700, padding: '12px',
+              borderRadius: 8, border: 'none', cursor: saving ? 'wait' : 'pointer', fontSize: 14,
+            }}>
+              {saving ? 'Guardando...' : 'Guardar configuración'}
             </button>
           </div>
         </div>

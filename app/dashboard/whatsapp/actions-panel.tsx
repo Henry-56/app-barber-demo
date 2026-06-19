@@ -12,7 +12,6 @@ type SimpleClient = {
   loyaltyPoints: number; lastVisitAt?: string | null; createdAt?: string;
 };
 type Actions = {
-  reminders: Reminder[];
   noShows: Reminder[];
   loyalty: SimpleClient[];
   inactive: SimpleClient[];
@@ -69,12 +68,10 @@ export default function ActionsPanel() {
     setWaOpened(prev => { const n = { ...prev }; delete n[key]; return n; });
     if (confirmed) {
       setWaDone(prev => new Set(prev).add(key));
-      // Eliminar el item del estado local para que desaparezca
       setActions(a => {
         if (!a) return a;
         const next = { ...a, total: a.total - 1 };
-        if (type === 'recordatorio') next.reminders = a.reminders.filter(r => r.id !== itemId);
-        else if (type === 'fidelizacion') next.loyalty = a.loyalty.filter(c => c.id !== itemId);
+        if (type === 'fidelizacion') next.loyalty = a.loyalty.filter(c => c.id !== itemId);
         else if (type === 'bienvenida') next.newClients = a.newClients.filter(c => c.id !== itemId);
         else if (type === 'recuperacion') {
           next.inactive = a.inactive.filter(c => c.id !== itemId);
@@ -144,31 +141,6 @@ export default function ActionsPanel() {
               </div>
               <WaButton trackKey={key} itemId={c.id} type="bienvenida" label="📱 Bienvenida"
                 onClick={() => openWa(key, 'bienvenida', c.phone, c.id, { clientName: c.name })} />
-            </div>
-          );
-        })}
-
-        {/* Recordatorios */}
-        {actions.reminders.map(r => {
-          const dt = new Date(r.scheduledAt);
-          const key = `recordatorio-${r.id}`;
-          return (
-            <div key={r.id} className="px-5 py-3 flex items-start justify-between gap-3">
-              <div>
-                <p className="text-sm font-semibold text-white">{r.clientName ?? '—'}</p>
-                <p className="text-xs" style={{ color: '#a0a0a0' }}>
-                  Cita mañana · {dt.toLocaleTimeString('es-PE', { hour: '2-digit', minute: '2-digit' })}
-                  {r.service && ` · ${r.service}`}
-                </p>
-              </div>
-              <WaButton trackKey={key} itemId={r.id} type="recordatorio" label="📱 Recordatorio"
-                onClick={() => r.clientPhone && openWa(key, 'recordatorio', r.clientPhone, r.clientId, {
-                  clientName: r.clientName ?? '',
-                  date: dt.toLocaleDateString('es-PE', { weekday: 'long', day: 'numeric', month: 'long' }),
-                  time: dt.toLocaleTimeString('es-PE', { hour: '2-digit', minute: '2-digit' }),
-                  service: r.service ?? 'Corte',
-                  barberName: r.barberName ?? '',
-                }, r.id)} />
             </div>
           );
         })}

@@ -33,6 +33,13 @@ export const barbershops = pgTable('barbershops', {
   whatsappTemplateRecuperacion: text('whatsapp_template_recuperacion'),
   whatsappTemplateFidelizacion: text('whatsapp_template_fidelizacion'),
   whatsappTemplateBienvenida: text('whatsapp_template_bienvenida'),
+  // Cobro de anticipo
+  depositEnabled: boolean('deposit_enabled').notNull().default(false),
+  depositAmount: decimal('deposit_amount', { precision: 10, scale: 2 }).default('0'),
+  depositMandatory: boolean('deposit_mandatory').notNull().default(false),
+  paymentQrUrl: text('payment_qr_url'),
+  paymentPhone: varchar('payment_phone', { length: 50 }),
+  paymentMethodLabel: varchar('payment_method_label', { length: 50 }).default('Yape'),
   createdAt: timestamp('created_at').defaultNow().notNull(),
 });
 
@@ -101,6 +108,12 @@ export const appointments = pgTable('appointments', {
   source: text('source').default('manual'),
   reminderSent24h: boolean('reminder_sent_24h').notNull().default(false),
   reminderSent2h: boolean('reminder_sent_2h').notNull().default(false),
+  // Anticipo
+  depositRequired: boolean('deposit_required').notNull().default(false),
+  depositAmount: decimal('deposit_amount', { precision: 10, scale: 2 }),
+  depositStatus: varchar('deposit_status', { length: 30 }).notNull().default('not_required'),
+  depositConfirmedAt: timestamp('deposit_confirmed_at'),
+  depositConfirmedBy: text('deposit_confirmed_by'),
   createdAt: timestamp('created_at').defaultNow().notNull(),
 });
 

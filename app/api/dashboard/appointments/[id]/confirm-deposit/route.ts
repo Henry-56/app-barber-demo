@@ -14,17 +14,19 @@ export async function POST(_req: Request, { params }: { params: Promise<{ id: st
 
   const [updated] = await db
     .update(appointments)
-    .set({ status: 'scheduled' })
-    .where(
-      and(
-        eq(appointments.id, id),
-        eq(appointments.barbershopId, session.user.barbershopId),
-        eq(appointments.status, 'pending_confirmation'),
-      ),
-    )
+    .set({
+      status: 'scheduled',
+      depositStatus: 'confirmed',
+      depositConfirmedAt: new Date(),
+      depositConfirmedBy: session.user.barbershopId,
+    })
+    .where(and(
+      eq(appointments.id, id),
+      eq(appointments.barbershopId, session.user.barbershopId),
+      eq(appointments.status, 'pending_payment'),
+    ))
     .returning();
 
   if (!updated) return NextResponse.json({ error: 'Not found' }, { status: 404 });
-
   return NextResponse.json({ success: true });
 }

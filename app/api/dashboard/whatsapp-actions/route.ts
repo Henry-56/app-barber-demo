@@ -1,8 +1,8 @@
 import { NextResponse } from 'next/server';
 import { auth } from '@/src/lib/auth';
 import { db } from '@/src/lib/drizzle';
-import { appointments, clients, barbers, whatsappMessages } from '@/src/lib/schema';
-import { eq, and, gte, lte, inArray } from 'drizzle-orm';
+import { appointments, clients, whatsappMessages } from '@/src/lib/schema';
+import { eq, and, gte, lte } from 'drizzle-orm';
 
 export async function GET() {
   const session = await auth();
@@ -12,31 +12,6 @@ export async function GET() {
   const now = new Date();
   const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate());
   const todayEnd   = new Date(todayStart.getTime() + 86_400_000);
-  const tomorrowStart = new Date(todayStart.getTime() + 86_400_000);
-  const tomorrowEnd   = new Date(tomorrowStart.getTime() + 86_400_000);
-
-  // Citas de mañana que necesitan recordatorio (no sent yet)
-  const reminders = await db
-    .select({
-      id: appointments.id,
-      scheduledAt: appointments.scheduledAt,
-      service: appointments.service,
-      clientId: clients.id,
-      clientName: clients.name,
-      clientPhone: clients.phone,
-      barberName: barbers.name,
-    })
-    .from(appointments)
-    .leftJoin(clients, eq(appointments.clientId, clients.id))
-    .leftJoin(barbers, eq(appointments.barberId, barbers.id))
-    .where(and(
-      eq(appointments.barbershopId, bid),
-      inArray(appointments.status, ['scheduled', 'pending_confirmation']),
-      gte(appointments.scheduledAt, tomorrowStart),
-      lte(appointments.scheduledAt, tomorrowEnd),
-      eq(appointments.reminderSent24h, false),
-    ))
-    .orderBy(appointments.scheduledAt);
 
   // No-shows de hoy
   const noShows = await db
@@ -88,7 +63,7 @@ export async function GET() {
   const sentBienvenidaIds = new Set(sentBienvenida.map(m => m.clientId));
   const newClients = recentClients.filter(c => !sentBienvenidaIds.has(c.id));
 
-  const total = reminders.length + noShows.length + loyalty.length + inactive.length + newClients.length;
+  const total = noShows.length + loyalty.length + inactive.length + newClients.length;
 
-  return NextResponse.json({ reminders, noShows, loyalty, inactive, newClients, total });
+  return NextResponse.json({ noShows, loyalty, inactive, newClients, total });
 }

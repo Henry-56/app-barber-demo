@@ -5,6 +5,7 @@ import { clients } from '@/src/lib/schema';
 import { and, eq, desc } from 'drizzle-orm';
 import { findOrCreateClient } from '@/src/lib/clients';
 import { normalizePhone } from '@/src/lib/phone';
+import { isTrialActive, trialExpiredResponse } from '@/src/lib/trial-guard';
 
 export async function GET(req: Request) {
   const session = await auth();
@@ -52,6 +53,7 @@ export async function GET(req: Request) {
 export async function POST(req: Request) {
   const session = await auth();
   if (!session?.user?.barbershopId) return NextResponse.json({ error: 'No autorizado' }, { status: 401 });
+  if (!await isTrialActive(session.user.barbershopId)) return trialExpiredResponse();
 
   const { phone, name, notes } = await req.json();
 

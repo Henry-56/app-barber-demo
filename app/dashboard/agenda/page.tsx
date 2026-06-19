@@ -1,8 +1,8 @@
 'use client';
 
 import React, { useState, useEffect, useCallback } from 'react';
-import { Plus, CheckCircle, XCircle, UserX, Loader2, CalendarDays, ChevronLeft, ChevronRight, Clock } from 'lucide-react';
-import { buildWaMessage, type ShopWaData } from '@/src/lib/whatsapp-manual';
+import { Plus, CheckCircle, XCircle, UserX, Loader2, CalendarDays, ChevronLeft, ChevronRight, Clock, Zap, RefreshCw, Banknote } from 'lucide-react';
+import { buildWaMessage, generateWhatsAppLink, type ShopWaData } from '@/src/lib/whatsapp-manual';
 
 type AppointmentRow = {
   appointment: {
@@ -18,12 +18,177 @@ type Client = { id: string; name: string; phone: string };
 
 const STATUS_CONFIG = {
   pending_confirmation: { label: 'Por confirmar', color: '#f59e0b' },
-  scheduled:  { label: 'Confirmada',  color: '#3b82f6' },
-  completed:  { label: 'Completada', color: '#22c55e' },
-  cancelled:  { label: 'Cancelada',  color: '#ef4444' },
-  no_show:    { label: 'No asistió', color: '#f59e0b' },
+  pending_payment:      { label: 'Anticipo pendiente', color: '#a855f7' },
+  scheduled:   { label: 'Confirmada',  color: '#3b82f6' },
+  completed:   { label: 'Completada', color: '#22c55e' },
+  cancelled:   { label: 'Cancelada',  color: '#ef4444' },
+  no_show:     { label: 'No asistió', color: '#f59e0b' },
 } as const;
 
+// ─── AccionesPanel — solo no-shows (reenganche) ───────────────────────────
+type ActionAppt = {
+  appt: { id: string; scheduledAt: string; service: string | null; price: number | null };
+  client: { id: string; name: string; phone: string } | null;
+  barber: { id: string; name: string } | null;
+};
+
+function AccionesPanel({ shop }: { shop: ShopWaData | null }) {
+  const [noShows, setNoShows] = useState<ActionAppt[]>([]);
+  const [sent, setSent] = useState<Record<string, boolean>>({});
+
+  const load = useCallback(() => {
+    fetch('/api/dashboard/actions').then(r => r.json()).then(d => setNoShows(d.noShows ?? [])).catch(() => {});
+  }, []);
+
+  useEffect(() => { load(); }, [load]);
+
+  if (noShows.length === 0) return null;
+
+  const fmtTime = (iso: string) =>
+    new Date(iso).toLocaleTimeString('es-PE', { hour: '2-digit', minute: '2-digit', timeZone: 'America/Lima' });
+
+  const handleReenganche = (a: ActionAppt) => {
+    if (!shop || !a.client) return;
+    const dt = new Date(a.appt.scheduledAt);
+    const { url } = buildWaMessage(shop, 'recuperacion', a.client.phone, {
+      clientName: a.client.name,
+      date: dt.toLocaleDateString('es-PE', { weekday: 'long', day: 'numeric', month: 'long', timeZone: 'America/Lima' }),
+      time: fmtTime(a.appt.scheduledAt),
+      service: a.appt.service ?? 'Corte',
+      barberName: a.barber?.name ?? '',
+    });
+    window.open(url, '_blank');
+    setSent(p => ({ ...p, [a.appt.id]: true }));
+  };
+
+  return (
+    <div className="rounded-2xl border p-4" style={{ backgroundColor: '#0d0d1a', borderColor: '#3b82f640' }}>
+      <div className="flex items-center gap-2 mb-3">
+        <Zap className="w-4 h-4" style={{ color: '#3b82f6' }} />
+        <h2 className="text-sm font-bold" style={{ color: '#3b82f6' }}>
+          Acciones pendientes ({noShows.length})
+        </h2>
+      </div>
+      <div className="mb-1">
+        <div className="flex items-center gap-1.5 mb-2">
+          <RefreshCw className="w-3 h-3" style={{ color: '#a0a0a0' }} />
+          <span className="text-xs font-semibold uppercase tracking-wider" style={{ color: '#666' }}>No asistió — reenganche</span>
+        </div>
+        {noShows.map(a => {
+          const isDone = sent[a.appt.id] ?? false;
+          return (
+            <div key={a.appt.id} className="flex items-center justify-between gap-3 py-2 border-b last:border-0" style={{ borderColor: '#2a2a2a' }}>
+              <div className="min-w-0">
+                <p className="text-sm font-semibold text-white truncate">{a.client?.name ?? '—'}</p>
+                <p className="text-xs" style={{ color: '#666' }}>
+                  {fmtTime(a.appt.scheduledAt)} · {a.appt.service ?? 'Corte'}
+                  {a.barber && ` · ${a.barber.name}`}
+                </p>
+              </div>
+              <button onClick={() => handleReenganche(a)} disabled={isDone}
+                className="flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all shrink-0"
+                style={{ background: isDone ? '#22222280' : '#ef444420', color: isDone ? '#555' : '#ef4444', border: `1px solid ${isDone ? '#333' : '#ef444440'}` }}>
+                {isDone ? '✓ Enviado' : '📱 Reenganche'}
+              </button>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+// ─── DepositPanel — anticipos por verificar ───────────────────────────────
+type DepositAppt = {
+  id: string; scheduledAt: string; service: string | null;
+  depositAmount: string | null; depositStatus: string;
+  clientId: string | null; clientName: string | null; clientPhone: string | null;
+  barberName: string | null;
+};
+
+function DepositPanel({ shop, onRefresh }: { shop: ShopWaData | null; onRefresh: () => void }) {
+  const [deposits, setDeposits] = useState<DepositAppt[]>([]);
+  const [acting, setActing] = useState<string | null>(null);
+
+  const load = useCallback(() => {
+    fetch('/api/dashboard/pending-deposits').then(r => r.json()).then(setDeposits).catch(() => {});
+  }, []);
+
+  useEffect(() => { load(); }, [load]);
+
+  if (deposits.length === 0) return null;
+
+  const confirmDeposit = async (d: DepositAppt) => {
+    setActing(d.id);
+    await fetch(`/api/dashboard/appointments/${d.id}/confirm-deposit`, { method: 'POST' });
+    if (shop && d.clientPhone) {
+      const dt = new Date(d.scheduledAt);
+      const { message } = buildWaMessage(shop, 'confirmacion', d.clientPhone, {
+        clientName: d.clientName ?? '',
+        date: dt.toLocaleDateString('es-PE', { weekday: 'long', day: 'numeric', month: 'long', timeZone: 'America/Lima' }),
+        time: dt.toLocaleTimeString('es-PE', { hour: '2-digit', minute: '2-digit', timeZone: 'America/Lima' }),
+        service: d.service ?? 'Corte',
+        barberName: d.barberName ?? '',
+      });
+      const fullMsg = message + `\n💰 Anticipo de S/${d.depositAmount} recibido — ¡gracias!`;
+      window.open(generateWhatsAppLink(d.clientPhone, fullMsg), '_blank');
+    }
+    load();
+    onRefresh();
+    setActing(null);
+  };
+
+  const noPayment = (d: DepositAppt) => {
+    if (!d.clientPhone) return;
+    const msg = `Hola ${d.clientName ?? ''}, no hemos podido verificar tu pago del anticipo de S/${d.depositAmount}. ¿Podrías confirmarnos o reenviar el comprobante?`;
+    window.open(generateWhatsAppLink(d.clientPhone, msg), '_blank');
+  };
+
+  return (
+    <div className="rounded-2xl border p-4" style={{ backgroundColor: '#0f0a1a', borderColor: '#a855f740' }}>
+      <div className="flex items-center gap-2 mb-3">
+        <Banknote className="w-4 h-4" style={{ color: '#a855f7' }} />
+        <h2 className="text-sm font-bold" style={{ color: '#a855f7' }}>
+          Anticipos por verificar ({deposits.length})
+        </h2>
+      </div>
+      <div className="space-y-3">
+        {deposits.map(d => {
+          const dt = new Date(d.scheduledAt);
+          const dateStr = dt.toLocaleDateString('es-PE', { weekday: 'short', day: 'numeric', month: 'short', timeZone: 'America/Lima' });
+          const timeStr = dt.toLocaleTimeString('es-PE', { hour: '2-digit', minute: '2-digit', timeZone: 'America/Lima' });
+          return (
+            <div key={d.id} className="rounded-xl border p-3" style={{ backgroundColor: '#161616', borderColor: '#2a2a2a' }}>
+              <div className="mb-2">
+                <p className="font-semibold text-white text-sm">{d.clientName ?? '—'}</p>
+                <p className="text-xs" style={{ color: '#a0a0a0' }}>
+                  {dateStr} · {timeStr}{d.service && ` · ${d.service}`}{d.barberName && ` · ${d.barberName}`}
+                </p>
+                <p className="text-xs font-medium mt-0.5" style={{ color: '#a855f7' }}>
+                  Dice que pagó S/{d.depositAmount} por Yape/Plin
+                </p>
+              </div>
+              <div className="flex gap-2">
+                <button onClick={() => confirmDeposit(d)} disabled={acting === d.id}
+                  className="flex-1 py-1.5 rounded-lg text-xs font-bold"
+                  style={{ backgroundColor: '#22c55e20', color: '#22c55e', border: '1px solid #22c55e30' }}>
+                  {acting === d.id ? '...' : '✓ Confirmo que llegó el pago'}
+                </button>
+                <button onClick={() => noPayment(d)} disabled={acting === d.id}
+                  className="flex-1 py-1.5 rounded-lg text-xs font-bold"
+                  style={{ backgroundColor: '#ef444420', color: '#ef4444', border: '1px solid #ef444430' }}>
+                  ✗ No veo el pago
+                </button>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+// ─── PendingPanel — solicitudes pendientes de confirmación ────────────────
 type PendingAction = {
   id: string; scheduledAt: string; service: string | null; price: number | null;
   notes: string | null; source: string | null;
@@ -60,7 +225,6 @@ function PendingPanel({ onRefresh }: { onRefresh: () => void }) {
       barberName: p.barberName ?? '',
     });
     window.open(url, '_blank');
-    // Log automático como "pendiente" — el barbero lo cierra enviando
     fetch('/api/dashboard/whatsapp-log', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -70,7 +234,6 @@ function PendingPanel({ onRefresh }: { onRefresh: () => void }) {
   };
 
   const act = async (id: string, action: 'confirm' | 'reject') => {
-    // Al confirmar, abrir WhatsApp automáticamente con el mensaje de confirmación
     if (action === 'confirm') {
       const p = pending.find(x => x.id === id);
       if (p) openConfirmWa(p);
@@ -140,9 +303,7 @@ function PendingPanel({ onRefresh }: { onRefresh: () => void }) {
                 </span>
               </div>
               <div className="flex gap-2">
-                <button
-                  onClick={() => handleWaClick(p)}
-                  disabled={!shop}
+                <button onClick={() => handleWaClick(p)} disabled={!shop}
                   className="px-2 py-1.5 rounded-lg text-xs font-medium"
                   style={{ backgroundColor: '#25D36620', color: waDone ? '#22c55e' : '#25D366', border: `1px solid ${waDone ? '#22c55e30' : '#25D36630'}` }}>
                   {waDone ? '✓ Enviado' : '📱 WhatsApp'}
@@ -158,7 +319,6 @@ function PendingPanel({ onRefresh }: { onRefresh: () => void }) {
                   ✕ Rechazar
                 </button>
               </div>
-              {/* Prompt de confirmación de envío */}
               {waState && !waDone && (
                 <div className="mt-2 flex items-center gap-2 rounded-lg px-3 py-2" style={{ backgroundColor: '#25D36610', border: '1px solid #25D36620' }}>
                   <span className="text-xs flex-1" style={{ color: '#a0a0a0' }}>¿Enviaste el mensaje?</span>
@@ -168,8 +328,7 @@ function PendingPanel({ onRefresh }: { onRefresh: () => void }) {
                     Sí, lo envié
                   </button>
                   <button onClick={() => handleWaConfirm(p.id, false)}
-                    className="text-xs px-2 py-1 rounded-md"
-                    style={{ color: '#555' }}>
+                    className="text-xs px-2 py-1 rounded-md" style={{ color: '#555' }}>
                     No
                   </button>
                 </div>
@@ -246,7 +405,6 @@ function NewCitaModal({ onClose, onCreated }: { onClose: () => void; onCreated: 
       <div className="w-full max-w-md rounded-2xl border p-5 max-h-[90vh] overflow-y-auto" style={{ backgroundColor: '#161616', borderColor: '#2a2a2a' }}>
         <h2 className="text-lg font-bold text-white mb-4">Nueva cita</h2>
         <form onSubmit={handleSubmit} className="space-y-3">
-          {/* Cliente */}
           <div>
             <label className="block text-xs font-medium mb-1" style={{ color: '#a0a0a0' }}>Cliente *</label>
             {selectedClient ? (
@@ -275,7 +433,6 @@ function NewCitaModal({ onClose, onCreated }: { onClose: () => void; onCreated: 
             )}
           </div>
 
-          {/* Barbero */}
           <div>
             <label className="block text-xs font-medium mb-1" style={{ color: '#a0a0a0' }}>Barbero</label>
             <select value={barberId} onChange={e => setBarberId(e.target.value)}
@@ -287,7 +444,6 @@ function NewCitaModal({ onClose, onCreated }: { onClose: () => void; onCreated: 
             </select>
           </div>
 
-          {/* Fecha y hora */}
           <div className="grid grid-cols-2 gap-3">
             <div>
               <label className="block text-xs font-medium mb-1" style={{ color: '#a0a0a0' }}>Fecha *</label>
@@ -305,7 +461,6 @@ function NewCitaModal({ onClose, onCreated }: { onClose: () => void; onCreated: 
             </div>
           </div>
 
-          {/* Servicio y precio */}
           <input className={inputStyle} style={inputBase} placeholder="Servicio (ej: Corte clásico)"
             value={service} onChange={e => setService(e.target.value)}
             onFocus={e => (e.target.style.borderColor = '#C9A84C')}
@@ -341,6 +496,11 @@ export default function AgendaPage() {
   const [date, setDate] = useState(() => new Date().toISOString().split('T')[0]);
   const [showModal, setShowModal] = useState(false);
   const [updating, setUpdating] = useState<string | null>(null);
+  const [shop, setShop] = useState<ShopWaData | null>(null);
+
+  useEffect(() => {
+    fetch('/api/dashboard/settings').then(r => r.json()).then(setShop).catch(() => {});
+  }, []);
 
   const fetchAppointments = useCallback(async () => {
     setLoading(true);
@@ -374,7 +534,13 @@ export default function AgendaPage() {
 
   return (
     <div className="p-4 sm:p-6 max-w-3xl mx-auto space-y-5">
-      {/* Pending confirmations panel */}
+      {/* Anticipos por verificar */}
+      <DepositPanel shop={shop} onRefresh={fetchAppointments} />
+
+      {/* No-shows — reenganche */}
+      <AccionesPanel shop={shop} />
+
+      {/* Solicitudes pendientes de confirmación */}
       <PendingPanel onRefresh={fetchAppointments} />
 
       <div className="flex items-center justify-between gap-4">

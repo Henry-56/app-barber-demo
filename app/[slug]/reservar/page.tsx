@@ -6,11 +6,17 @@ type Shop = {
   id: string; name: string; slug: string; appointmentDuration: number;
   openingHours: Record<string, { open: string; close: string; closed: boolean }>;
   maxAdvanceDays: number; minAdvanceHours: number;
+  depositEnabled: boolean | null;
+  depositAmount: string | null;
+  depositMandatory: boolean | null;
+  paymentQrUrl: string | null;
+  paymentPhone: string | null;
+  paymentMethodLabel: string | null;
   barbers: { id: string; name: string }[];
   services: { id: string; name: string; price: string; durationMinutes: number }[];
 };
 
-type Step = 'phone' | 'service' | 'barber' | 'date' | 'time' | 'done';
+type Step = 'phone' | 'service' | 'barber' | 'date' | 'time' | 'payment' | 'done';
 
 type FoundClient = { clientId: string; name: string; loyaltyPoints: number };
 
@@ -49,6 +55,8 @@ export default function ReservarPage({ params }: { params: Promise<{ slug: strin
   const [availableDates, setAvailableDates] = useState<string[]>([]);
   const [submitting, setSubmitting] = useState(false);
   const [resultClientId, setResultClientId] = useState<string>('');
+  const [depositPaidResult, setDepositPaidResult] = useState<boolean>(false);
+  const [phoneCopied, setPhoneCopied] = useState(false);
 
   useEffect(() => {
     fetch(`/api/public/${slug}`)
@@ -108,7 +116,7 @@ export default function ReservarPage({ params }: { params: Promise<{ slug: strin
     }
   };
 
-  const handleSubmit = async () => {
+  const handleSubmit = async (depositPaid: boolean) => {
     setSubmitting(true);
     const clientName = foundClient ? foundClient.name : newName.trim();
     const res = await fetch(`/api/public/${slug}/book`, {
@@ -122,14 +130,23 @@ export default function ReservarPage({ params }: { params: Promise<{ slug: strin
         date: selectedDate,
         time: selectedTime,
         notes: notes.trim() || null,
+        depositPaid,
       }),
     });
     const data = await res.json();
     setSubmitting(false);
     if (data.success) {
       setResultClientId(data.clientId);
+      setDepositPaidResult(depositPaid);
       setStep('done');
     }
+  };
+
+  const copyPhone = async () => {
+    if (!shop?.paymentPhone) return;
+    await navigator.clipboard.writeText(shop.paymentPhone);
+    setPhoneCopied(true);
+    setTimeout(() => setPhoneCopied(false), 2000);
   };
 
   if (shopNotFound) {
@@ -164,7 +181,7 @@ export default function ReservarPage({ params }: { params: Promise<{ slug: strin
         </div>
       </div>
 
-      {/* Progress bar — only for steps service/barber/date/time */}
+      {/* Progress bar — steps service/barber/date/time */}
       {stepIndex >= 0 && step !== 'done' && (
         <div style={{ display: 'flex', gap: 4, padding: '20px 24px 0', maxWidth: 560, margin: '0 auto' }}>
           {progressSteps.map((s, i) => (
@@ -213,7 +230,6 @@ export default function ReservarPage({ params }: { params: Promise<{ slug: strin
                 </button>
               )}
 
-              {/* Found client */}
               {phoneChecked && foundClient && (
                 <div>
                   <div style={{ background: '#0d1f0d', border: '1px solid #22c55e44', borderRadius: 10, padding: '14px 16px', marginBottom: 14 }}>
@@ -233,7 +249,6 @@ export default function ReservarPage({ params }: { params: Promise<{ slug: strin
                 </div>
               )}
 
-              {/* New client */}
               {phoneChecked && isNewClient && (
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
                   <div style={{ background: '#1a140a', border: '1px solid #C9A84C44', borderRadius: 10, padding: '12px 14px' }}>
@@ -387,7 +402,6 @@ export default function ReservarPage({ params }: { params: Promise<{ slug: strin
               </div>
             )}
 
-            {/* Notes */}
             {selectedTime && (
               <div style={{ marginBottom: 16 }}>
                 <label style={{ fontSize: 13, color: '#aaa', display: 'block', marginBottom: 6 }}>Nota para el barbero (opcional)</label>
@@ -407,7 +421,7 @@ export default function ReservarPage({ params }: { params: Promise<{ slug: strin
 
             {selectedTime && (
               <button
-                onClick={handleSubmit}
+                onClick={() => shop.depositEnabled ? setStep('payment') : handleSubmit(false)}
                 disabled={submitting}
                 style={{
                   background: submitting ? '#333' : gold,
@@ -415,7 +429,7 @@ export default function ReservarPage({ params }: { params: Promise<{ slug: strin
                   border: 'none', cursor: submitting ? 'not-allowed' : 'pointer',
                   fontSize: 16, width: '100%',
                 }}>
-                {submitting ? 'Enviando...' : 'Confirmar reserva'}
+                {submitting ? 'Enviando...' : shop.depositEnabled ? 'Continuar al pago →' : 'Confirmar reserva'}
               </button>
             )}
 
@@ -425,17 +439,118 @@ export default function ReservarPage({ params }: { params: Promise<{ slug: strin
           </div>
         )}
 
+        {/* ── STEP: PAYMENT ── */}
+        {step === 'payment' && (
+          <div>
+            <h2 style={{ fontSize: 22, marginBottom: 4 }}>Paga el anticipo</h2>
+            <p style={{ color: '#666', fontSize: 14, marginBottom: 24 }}>
+              Para confirmar tu cita, paga el anticipo de{' '}
+              <strong style={{ color: gold }}>S/{Number(shop.depositAmount ?? 0).toFixed(0)}</strong>{' '}
+              por {shop.paymentMethodLabel ?? 'Yape'}.
+            </p>
+
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+              {/* QR de imagen */}
+              {shop.paymentQrUrl && (
+                <div style={{ ...cardStyle, padding: 20, textAlign: 'center' }}>
+                  <p style={{ margin: '0 0 14px', fontSize: 13, color: '#aaa' }}>
+                    Escanea el código QR y paga S/{Number(shop.depositAmount ?? 0).toFixed(0)}
+                  </p>
+                  <img
+                    src={shop.paymentQrUrl}
+                    alt={`QR ${shop.paymentMethodLabel ?? 'Yape'}`}
+                    style={{ width: 200, height: 200, objectFit: 'contain', margin: '0 auto', display: 'block', background: '#fff', borderRadius: 8, padding: 8 }}
+                  />
+                </div>
+              )}
+
+              {/* Número de teléfono */}
+              {shop.paymentPhone && (
+                <div style={{ ...cardStyle, padding: 20 }}>
+                  {shop.paymentQrUrl && (
+                    <p style={{ margin: '0 0 10px', fontSize: 13, color: '#aaa' }}>O también puedes enviar por {shop.paymentMethodLabel ?? 'Yape'}:</p>
+                  )}
+                  {!shop.paymentQrUrl && (
+                    <p style={{ margin: '0 0 10px', fontSize: 13, color: '#aaa' }}>Envía por {shop.paymentMethodLabel ?? 'Yape'} al número:</p>
+                  )}
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 12, justifyContent: 'space-between' }}>
+                    <span style={{ fontSize: 22, fontWeight: 700, letterSpacing: 1 }}>📱 {shop.paymentPhone}</span>
+                    <button
+                      onClick={copyPhone}
+                      style={{
+                        background: phoneCopied ? '#22c55e20' : '#2a2a2a',
+                        border: `1px solid ${phoneCopied ? '#22c55e30' : '#3a3a3a'}`,
+                        borderRadius: 8, padding: '8px 14px', cursor: 'pointer',
+                        color: phoneCopied ? '#22c55e' : '#aaa', fontSize: 13, fontWeight: 600,
+                      }}>
+                      {phoneCopied ? '✓ Copiado' : 'Copiar'}
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              {/* Instrucción */}
+              <p style={{ margin: 0, fontSize: 13, color: '#555', textAlign: 'center' }}>
+                Una vez que realices el pago, presiona el botón de abajo.
+              </p>
+
+              {/* Botón: ya pagué */}
+              <button
+                onClick={() => handleSubmit(true)}
+                disabled={submitting}
+                style={{
+                  background: submitting ? '#333' : gold,
+                  color: '#0a0a0a', fontWeight: 700, padding: '16px', borderRadius: 10,
+                  border: 'none', cursor: submitting ? 'not-allowed' : 'pointer', fontSize: 16, width: '100%',
+                }}>
+                {submitting ? 'Enviando...' : `Ya pagué S/${Number(shop.depositAmount ?? 0).toFixed(0)} →`}
+              </button>
+
+              {/* Botón: pagar el día (solo si no es obligatorio) */}
+              {!shop.depositMandatory && (
+                <button
+                  onClick={() => handleSubmit(false)}
+                  disabled={submitting}
+                  style={{
+                    background: 'transparent', border: '1px solid #2a2a2a', borderRadius: 10,
+                    padding: '14px', cursor: 'pointer', color: '#666', fontSize: 14, width: '100%',
+                  }}>
+                  Prefiero pagar todo el día de mi cita
+                </button>
+              )}
+
+              <button onClick={() => setStep('time')} style={{ background: 'transparent', border: 'none', color: '#555', cursor: 'pointer', fontSize: 13 }}>
+                ← Volver a elegir hora
+              </button>
+            </div>
+          </div>
+        )}
+
         {/* ── STEP: DONE ── */}
         {step === 'done' && (
           <div style={{ textAlign: 'center', paddingTop: 32 }}>
             <div style={{ fontSize: 64, marginBottom: 16 }}>🎉</div>
             <h2 style={{ fontSize: 26, marginBottom: 8 }}>¡Reserva enviada!</h2>
-            <p style={{ color: '#aaa', fontSize: 15, marginBottom: 4 }}>
-              Tu cita está <strong style={{ color: gold }}>pendiente de confirmación</strong>.
-            </p>
-            <p style={{ color: '#666', fontSize: 14, marginBottom: 24 }}>
-              La barbería confirmará tu reserva a la brevedad.
-            </p>
+
+            {depositPaidResult ? (
+              <>
+                <p style={{ color: '#aaa', fontSize: 15, marginBottom: 4 }}>
+                  Tu anticipo está <strong style={{ color: '#a855f7' }}>pendiente de verificación</strong>.
+                </p>
+                <p style={{ color: '#666', fontSize: 14, marginBottom: 24 }}>
+                  La barbería verificará tu pago y confirmará la cita a la brevedad.
+                </p>
+              </>
+            ) : (
+              <>
+                <p style={{ color: '#aaa', fontSize: 15, marginBottom: 4 }}>
+                  Tu cita está <strong style={{ color: gold }}>pendiente de confirmación</strong>.
+                </p>
+                <p style={{ color: '#666', fontSize: 14, marginBottom: 24 }}>
+                  La barbería confirmará tu reserva a la brevedad.
+                </p>
+              </>
+            )}
 
             {/* Loyalty summary */}
             {(foundClient || isNewClient) && (
